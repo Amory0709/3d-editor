@@ -14,4 +14,15 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: (id: string) => {
+          if (id.includes('node_modules/three')) return 'three';
+          if (id.includes('node_modules/@react-three')) return 'r3f';
+          return undefined;
+        },
+      },
+    },
+  },
 });

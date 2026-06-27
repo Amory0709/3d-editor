@@ -145,3 +145,37 @@ button.primary:hover { filter: brightness(1.08); }
   border-color: var(--accent);
   color: var(--accent);
 }
+.viewport.dragging::after {
+  content: '';
+  position: absolute;
+  inset: 12px;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: rgba(109, 167, 255, 0.05);
+  pointer-events: none;
+}
+.dropzone-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent);
+  pointer-events: none;
+  background: rgba(10, 12, 18, 0.4);
+}
+.error-banner {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  background: rgba(40, 18, 22, 0.92);
+  border: 1px solid var(--danger);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}

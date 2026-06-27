@@ -1,5 +1,6 @@
 import { useRef } from 'react';
-import { useEditor, type EditorMode, detectFormat, classifyKind } from '@/store/editor';
+import { useEditor, type EditorMode } from '@/store/editor';
+import { handleFiles } from '@/lib/upload';
 
 const MODES: { id: EditorMode; label: string }[] = [
   { id: 'mesh', label: 'Mesh' },
@@ -7,39 +8,11 @@ const MODES: { id: EditorMode; label: string }[] = [
   { id: 'gaussian', label: 'Gaussian' },
 ];
 
-const ACCEPT = '.glb,.gltf,.obj,.splat,.ply,.spz';
+const ACCEPT = '.glb,.gltf,.obj';
 
 export function Toolbar() {
-  const { mode, setMode, addAsset, setLoading, setError, loading } = useEditor();
+  const { mode, setMode, loading } = useEditor();
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setError(null);
-    setLoading(true);
-    try {
-      for (const file of Array.from(files)) {
-        const format = detectFormat(file.name);
-        if (format === 'unknown') {
-          setError(`Unsupported file type: ${file.name}`);
-          continue;
-        }
-        const url = URL.createObjectURL(file);
-        addAsset({
-          id: crypto.randomUUID(),
-          name: file.name,
-          url,
-          format,
-          kind: classifyKind(format),
-          size: file.size,
-          loadedAt: Date.now(),
-        });
-      }
-    } finally {
-      setLoading(false);
-      if (inputRef.current) inputRef.current.value = '';
-    }
-  };
 
   return (
     <div className="toolbar">
@@ -64,7 +37,10 @@ export function Toolbar() {
         accept={ACCEPT}
         multiple
         style={{ display: 'none' }}
-        onChange={(e) => handleFiles(e.target.files)}
+        onChange={(e) => {
+          void handleFiles(e.target.files);
+          e.target.value = '';
+        }}
       />
       <button
         className="primary"
