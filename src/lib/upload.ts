@@ -46,6 +46,7 @@ export async function handleFiles(files: FileList | null): Promise<void> {
       size: file.size,
       loadedAt: Date.now(),
       transform: { ...DEFAULT_TRANSFORM },
+      collider: null,
     });
     added++;
   }

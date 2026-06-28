@@ -1,19 +1,19 @@
-import { useEditor, type TransformMode, type EditorMode } from '@/store/editor';
-import { PRIMITIVE_TYPES, primitiveLabel } from '@/lib/formats';
+import { useEditor, type TransformMode, type EditorMode, type AxisLock } from '@/store/editor';
+import { PRIMITIVE_TYPES, primitiveLabel, COLLIDER_TYPES, colliderLabel } from '@/lib/formats';
 
 const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
   mesh: {
     title: 'Mesh mode',
     lines: [
       'Upload a .glb / .gltf / .obj or add a primitive below.',
-      'Phase 3: transform with W/E/R, F to refit, Esc to deselect.',
+      'W/E/R mode · X/Y/Z lock axis · F refit · Esc deselect · ⌘Z undo.',
     ],
   },
   collision: {
     title: 'Collision mode',
     lines: [
-      'Upload or pick a mesh first.',
-      'Phase 4 will add box / sphere / capsule / cylinder / convex / trimesh colliders.',
+      'Pick a mesh, then assign a collider marker.',
+      'Phase 4a: box / sphere / capsule / cylinder (visual only).',
     ],
   },
   gaussian: {
@@ -31,6 +31,19 @@ const TRANSFORM_LABEL: Record<TransformMode, string> = {
   scale: 'Scale (R)',
 };
 
+const AXIS_LABEL: Record<Exclude<AxisLock, null>, string> = {
+  x: 'X',
+  y: 'Y',
+  z: 'Z',
+};
+
+const AXES: Array<Exclude<AxisLock, null>> = ['x', 'y', 'z'];
+
+/** Format a transform triple as "1.20, 0.00, -0.50" for compact display. */
+function fmt3(v: readonly [number, number, number]): string {
+  return v.map((n) => n.toFixed(2)).join(', ');
+}
+
 export function Sidebar() {
   const mode = useEditor((s) => s.mode);
   const assets = useEditor((s) => s.assets);
@@ -40,7 +53,19 @@ export function Sidebar() {
   const addPrimitive = useEditor((s) => s.addPrimitive);
   const transformMode = useEditor((s) => s.transformMode);
   const setTransformMode = useEditor((s) => s.setTransformMode);
+  const axisLock = useEditor((s) => s.axisLock);
+  const setAxisLock = useEditor((s) => s.setAxisLock);
+  const resetAssetTransform = useEditor((s) => s.resetAssetTransform);
+  const setAssetCollider = useEditor((s) => s.setAssetCollider);
+  const undo = useEditor((s) => s.undo);
+  const redo = useEditor((s) => s.redo);
+  const canUndo = useEditor((s) => s.canUndo());
+  const canRedo = useEditor((s) => s.canRedo());
   const blurb = MODE_BLURB[mode];
+
+  const activeAsset = activeAssetId
+    ? assets.find((a) => a.id === activeAssetId) ?? null
+    : null;
 
   return (
     <aside className="sidebar">
@@ -52,6 +77,25 @@ export function Sidebar() {
           </span>
         ))}
       </p>
+
+      <div className="history-row">
+        <button
+          className="history-btn"
+          onClick={undo}
+          disabled={!canUndo}
+          title="Undo (⌘Z)"
+        >
+          ↶ Undo
+        </button>
+        <button
+          className="history-btn"
+          onClick={redo}
+          disabled={!canRedo}
+          title="Redo (⌘⇧Z)"
+        >
+          ↷ Redo
+        </button>
+      </div>
 
       <h3 className="section-title">Primitives</h3>
       <div className="primitive-grid">
@@ -67,7 +111,7 @@ export function Sidebar() {
         ))}
       </div>
 
-      {activeAssetId && (
+      {activeAsset && (
         <>
           <h3 className="section-title">Transform</h3>
           <div className="transform-row">
@@ -78,6 +122,63 @@ export function Sidebar() {
                 onClick={() => setTransformMode(m)}
               >
                 {TRANSFORM_LABEL[m]}
+              </button>
+            ))}
+          </div>
+          <div className="axis-lock-row">
+            <span className="axis-lock-label">Lock axis</span>
+            {AXES.map((a) => (
+              <button
+                key={a}
+                className={`axis-btn${axisLock === a ? ' active' : ''}`}
+                onClick={() => setAxisLock(axisLock === a ? null : a)}
+                title={`Toggle ${a.toUpperCase()} axis lock`}
+              >
+                {AXIS_LABEL[a]}
+              </button>
+            ))}
+          </div>
+          <div className="transform-vals">
+            <div className="transform-vals-row">
+              <span className="transform-vals-label">pos</span>
+              <span className="transform-vals-text">{fmt3(activeAsset.transform.position)}</span>
+            </div>
+            <div className="transform-vals-row">
+              <span className="transform-vals-label">rot</span>
+              <span className="transform-vals-text">{fmt3(activeAsset.transform.rotation)}</span>
+            </div>
+            <div className="transform-vals-row">
+              <span className="transform-vals-label">scl</span>
+              <span className="transform-vals-text">{fmt3(activeAsset.transform.scale)}</span>
+            </div>
+          </div>
+          <button
+            className="reset-btn"
+            onClick={() => resetAssetTransform(activeAsset.id)}
+            title="Reset transform to identity"
+          >
+            ⟲ Reset transform
+          </button>
+        </>
+      )}
+
+      {mode === 'collision' && activeAsset && (
+        <>
+          <h3 className="section-title">Collider</h3>
+          <div className="collider-grid">
+            <button
+              className={`collider-btn${activeAsset.collider === null ? ' active' : ''}`}
+              onClick={() => setAssetCollider(activeAsset.id, null)}
+            >
+              None
+            </button>
+            {COLLIDER_TYPES.map((c) => (
+              <button
+                key={c}
+                className={`collider-btn${activeAsset.collider?.type === c ? ' active' : ''}`}
+                onClick={() => setAssetCollider(activeAsset.id, { type: c })}
+              >
+                {colliderLabel(c)}
               </button>
             ))}
           </div>
@@ -99,6 +200,7 @@ export function Sidebar() {
                 <div className="asset-meta">
                   {a.format !== 'unknown' ? `${a.format} · ` : ''}
                   {a.source === 'primitive' ? 'primitive' : `${(a.size / 1024).toFixed(1)} KB`}
+                  {a.collider ? ` · ${a.collider.type}` : ''}
                 </div>
               </button>
               <button

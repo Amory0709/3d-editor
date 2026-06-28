@@ -33,6 +33,7 @@ function Scene({ refitNonce }: { refitNonce: number }) {
     s.activeAssetId ? s.assets.find((a) => a.id === s.activeAssetId) ?? null : null,
   );
   const transformMode = useEditor((s) => s.transformMode);
+  const axisLock = useEditor((s) => s.axisLock);
   const setAssetTransform = useEditor((s) => s.setAssetTransform);
   const showDemo = !activeAsset;
 
@@ -86,7 +87,10 @@ function Scene({ refitNonce }: { refitNonce: number }) {
         <TransformControls
           object={groupObj}
           mode={transformMode}
-          size={0.8}
+          size={1.2}
+          showX={axisLock === null || axisLock === 'x'}
+          showY={axisLock === null || axisLock === 'y'}
+          showZ={axisLock === null || axisLock === 'z'}
           onObjectChange={() => {
             setAssetTransform(activeAsset.id, {
               position: [
@@ -172,7 +176,7 @@ export function Viewport() {
       </ErrorBoundary>
 
       <div className="overlay">
-        <span>W/E/R translate/rotate/scale · F refit · Esc deselect · Drop file to upload</span>
+        <span>W/E/R mode · X/Y/Z lock · F refit · Esc deselect · ⌘Z undo · Drop to upload</span>
         {loading && <span className="loading-tag">· loading…</span>}
       </div>
 

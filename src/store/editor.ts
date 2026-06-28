@@ -18,6 +18,13 @@ export type TransformMode = 'translate' | 'rotate' | 'scale';
 
 export type EditorMode = 'mesh' | 'collision' | 'gaussian';
 
+export type AxisLock = 'x' | 'y' | 'z' | null;
+
+/** Per-asset collider (phase 4a). null = no collider set. */
+export interface ColliderSpec {
+  type: 'box' | 'sphere' | 'capsule' | 'cylinder';
+}
+
 export interface AssetRef {
   /** stable id used as R3F key + state lookup */
   id: string;
@@ -39,7 +46,27 @@ export interface AssetRef {
   loadedAt: number;
   /** current transform in world space */
   transform: ObjectTransform;
+  /** assigned collider marker (phase 4a) */
+  collider: ColliderSpec | null;
 }
+
+/**
+ * Undo / redo stacks of `assets` snapshots.
+ *
+ * - `past` holds the snapshots taken BEFORE each trackable mutation.
+ * - `future` holds snapshots that were displaced by an undo, available
+ *   for redo. Any new mutation clears `future` (standard editor behavior).
+ *
+ * Snapshot is the full `assets` array — small enough that we don't need
+ * fine-grained command objects in phase 3.1. Each trackable action
+ * (add/remove/transform/collider) snapshots via `pushHistory` first.
+ */
+interface History {
+  past: AssetRef[][];
+  future: AssetRef[][];
+}
+
+const HISTORY_LIMIT = 100;
 
 interface EditorState {
   mode: EditorMode;
@@ -51,6 +78,8 @@ interface EditorState {
   removeAsset: (id: string) => void;
   setActiveAsset: (id: string | null) => void;
   setAssetTransform: (id: string, transform: ObjectTransform) => void;
+  resetAssetTransform: (id: string) => void;
+  setAssetCollider: (id: string, collider: ColliderSpec | null) => void;
 
   /** primitive authoring (phase 3) */
   addPrimitive: (type: PrimitiveType) => void;
@@ -58,6 +87,18 @@ interface EditorState {
   /** transform gizmo mode (phase 3) */
   transformMode: TransformMode;
   setTransformMode: (mode: TransformMode) => void;
+
+  /** axis lock (phase 3.1) — null = unlocked, 'x' / 'y' / 'z' = lock to that axis */
+  axisLock: AxisLock;
+  setAxisLock: (axis: AxisLock) => void;
+  toggleAxisLock: (axis: Exclude<AxisLock, null>) => void;
+
+  /** undo / redo (phase 3.1) */
+  history: History;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 
   /** global busy flag while parsing/loading a file */
   loading: boolean;
@@ -68,15 +109,25 @@ interface EditorState {
   setError: (error: string | null) => void;
 }
 
-export const useEditor = create<EditorState>((set) => ({
+/** Snapshot the current assets array onto the undo stack. */
+function snapshotHistory(prev: History, current: AssetRef[]): History {
+  const past = [...prev.past, current];
+  // Cap the stack so we don't grow unbounded.
+  if (past.length > HISTORY_LIMIT) past.shift();
+  return { past, future: [] };
+}
+
+export const useEditor = create<EditorState>((set, get) => ({
   mode: 'mesh',
   setMode: (mode) => set({ mode }),
 
   assets: [],
   activeAssetId: null,
+  history: { past: [], future: [] },
 
   addAsset: (asset) =>
     set((s) => ({
+      history: snapshotHistory(s.history, s.assets),
       assets: [...s.assets, asset],
       activeAssetId: asset.id,
     })),
@@ -87,6 +138,7 @@ export const useEditor = create<EditorState>((set) => ({
       if (target?.url) URL.revokeObjectURL(target.url);
       const remaining = s.assets.filter((a) => a.id !== id);
       return {
+        history: snapshotHistory(s.history, s.assets),
         assets: remaining,
         activeAssetId:
           s.activeAssetId === id ? (remaining[0]?.id ?? null) : s.activeAssetId,
@@ -97,7 +149,22 @@ export const useEditor = create<EditorState>((set) => ({
 
   setAssetTransform: (id, transform) =>
     set((s) => ({
+      history: snapshotHistory(s.history, s.assets),
       assets: s.assets.map((a) => (a.id === id ? { ...a, transform } : a)),
+    })),
+
+  resetAssetTransform: (id) =>
+    set((s) => ({
+      history: snapshotHistory(s.history, s.assets),
+      assets: s.assets.map((a) =>
+        a.id === id ? { ...a, transform: { ...DEFAULT_TRANSFORM } } : a,
+      ),
+    })),
+
+  setAssetCollider: (id, collider) =>
+    set((s) => ({
+      history: snapshotHistory(s.history, s.assets),
+      assets: s.assets.map((a) => (a.id === id ? { ...a, collider } : a)),
     })),
 
   addPrimitive: (type) => {
@@ -112,15 +179,62 @@ export const useEditor = create<EditorState>((set) => ({
       size: 0,
       loadedAt: Date.now(),
       transform: { ...DEFAULT_TRANSFORM },
+      collider: null,
     };
     set((s) => ({
+      history: snapshotHistory(s.history, s.assets),
       assets: [...s.assets, asset],
       activeAssetId: id,
     }));
   },
 
   transformMode: 'translate',
-  setTransformMode: (mode) => set({ transformMode: mode }),
+  setTransformMode: (mode) => {
+    // changing transform mode resets axis lock — locks are per-mode in Blender
+    set({ transformMode: mode, axisLock: null });
+  },
+
+  axisLock: null,
+  setAxisLock: (axis) => set({ axisLock: axis }),
+  toggleAxisLock: (axis) =>
+    set((s) => ({ axisLock: s.axisLock === axis ? null : axis })),
+
+  undo: () => {
+    const { history, assets, activeAssetId } = get();
+    if (history.past.length === 0) return;
+    const prev = history.past[history.past.length - 1];
+    const nextPast = history.past.slice(0, -1);
+    set({
+      assets: prev,
+      history: {
+        past: nextPast,
+        future: [assets, ...history.future],
+      },
+      activeAssetId: prev.find((a) => a.id === activeAssetId)
+        ? activeAssetId
+        : (prev[0]?.id ?? null),
+    });
+  },
+
+  redo: () => {
+    const { history, assets, activeAssetId } = get();
+    if (history.future.length === 0) return;
+    const next = history.future[0];
+    const rest = history.future.slice(1);
+    set({
+      assets: next,
+      history: {
+        past: [...history.past, assets],
+        future: rest,
+      },
+      activeAssetId: next.find((a) => a.id === activeAssetId)
+        ? activeAssetId
+        : (next[0]?.id ?? null),
+    });
+  },
+
+  canUndo: () => get().history.past.length > 0,
+  canRedo: () => get().history.future.length > 0,
 
   loading: false,
   setLoading: (loading) => set({ loading }),

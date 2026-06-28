@@ -1,7 +1,8 @@
 /**
- * Single source of truth for supported file formats.
- * Toolbar's <input accept> attribute, upload validation, and renderer dispatch
- * all read from here — never hardcode the list elsewhere.
+ * Single source of truth for supported file formats and primitive / collider
+ * vocabulary. Toolbar's <input accept> attribute, upload validation, renderer
+ * dispatch, primitive buttons, and collider buttons all read from here —
+ * never hardcode the list elsewhere.
  */
 
 export type AssetFormat =
@@ -15,7 +16,6 @@ export type AssetFormat =
 
 export type AssetKind = 'mesh' | 'gaussian';
 
-/** Procedural geometry types (phase 3). */
 export type PrimitiveType = 'cube' | 'sphere' | 'cylinder';
 
 export const PRIMITIVE_TYPES: readonly PrimitiveType[] = [
@@ -23,6 +23,10 @@ export const PRIMITIVE_TYPES: readonly PrimitiveType[] = [
   'sphere',
   'cylinder',
 ] as const;
+
+export function primitiveLabel(t: PrimitiveType): string {
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
 
 /** Formats the mesh renderer (phase 2) can show today. */
 export const MESH_FORMATS: ReadonlySet<AssetFormat> = new Set<AssetFormat>([
@@ -62,7 +66,26 @@ export function classifyKind(format: AssetFormat): AssetKind {
   return GAUSSIAN_FORMATS.has(format) ? 'gaussian' : 'mesh';
 }
 
-/** Display label for a primitive type. */
-export function primitiveLabel(p: PrimitiveType): string {
-  return p.charAt(0).toUpperCase() + p.slice(1);
+/* ───────────────────────── colliders (phase 4a) ───────────────────────── */
+
+export type ColliderType = 'box' | 'sphere' | 'capsule' | 'cylinder';
+
+export const COLLIDER_TYPES: readonly ColliderType[] = [
+  'box',
+  'sphere',
+  'capsule',
+  'cylinder',
+] as const;
+
+export function colliderLabel(t: ColliderType): string {
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/**
+ * Phase 4a: colliders are visual-only markers. They have a fixed default
+ * size per type. Custom halfExtents / radius / height will be added in
+ * phase 4b when physics integration ships.
+ */
+export interface ColliderSpec {
+  type: ColliderType;
 }
