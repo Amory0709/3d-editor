@@ -104,13 +104,53 @@ button.primary:hover { filter: brightness(1.08); }
   font-size: 13px;
   line-height: 1.5;
 }
-.sidebar .tool-group { margin-bottom: 18px; }
-.sidebar .tool-group .tool-row {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 6px;
+.sidebar .blurb-line {
+  display: block;
 }
-.sidebar .tool-group .tool-row button { flex: 1; }
+.sidebar .section-title {
+  margin-top: 24px;
+}
+.sidebar .asset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar .asset-row {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar .asset-row.active {
+  background: var(--panel-2);
+}
+.sidebar .asset-select {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+}
+.sidebar .asset-select:hover {
+  background: transparent;
+  border-color: transparent;
+}
+.sidebar .asset-name {
+  font-size: 13px;
+}
+.sidebar .asset-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.sidebar .asset-remove {
+  padding: 4px 8px;
+  font-size: 11px;
+}
 
 .viewport {
   position: relative;
@@ -178,4 +218,45 @@ button.primary:hover { filter: brightness(1.08); }
   border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
+}
+.error-banner .error-dismiss {
+  opacity: 0.6;
+  margin-left: 8px;
+}
+
+.viewport .loading-tag {
+  color: var(--accent-2);
+  margin-left: 12px;
+}
+
+.canvas-crash {
+  position: absolute;
+  inset: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--danger);
+  background: var(--panel);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.app-crash {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--danger);
+  background: var(--bg);
+}
+.app-crash h2 {
+  margin: 0;
+  color: var(--text);
+}
+.app-crash p {
+  margin: 0;
+  color: var(--text-dim);
 }

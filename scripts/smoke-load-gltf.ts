@@ -1,10 +1,13 @@
 // Smoke test: load a real .glb via three's GLTFLoader from Node and dump scene info.
 // Proves the loader path used by MeshRenderer actually parses real GLBs.
+// Usage: npx tsx scripts/smoke-load-gltf.ts <file.glb>
+//
 // Three's loaders use `self` in some code paths — polyfill for Node.
 (globalThis as unknown as { self: typeof globalThis }).self = globalThis;
 const { readFile } = await import('node:fs/promises');
 const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
 const { NodeIO } = await import('@gltf-transform/core');
+import type * as THREE from 'three';
 
 async function main() {
   const path = process.argv[2];
@@ -35,12 +38,12 @@ async function main() {
   let meshCount = 0;
   let triCount = 0;
   scene.traverse((o) => {
-    const m = o as unknown as { isMesh?: boolean; geometry?: { index?: { count: number } | null; attributes?: { position?: { count: number } } } };
-    if (m.isMesh) {
+    if ((o as THREE.Mesh).isMesh) {
+      const m = o as THREE.Mesh;
       meshCount++;
       const idx = m.geometry?.index;
       const pos = m.geometry?.attributes?.position;
-      triCount += idx ? idx.count / 3 : (pos ? pos.count / 3 : 0);
+      triCount += idx ? idx.count / 3 : pos ? pos.count / 3 : 0;
     }
   });
 

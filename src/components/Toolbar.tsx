@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useEditor, type EditorMode } from '@/store/editor';
 import { handleFiles } from '@/lib/upload';
+import { ACCEPT_ATTR } from '@/lib/formats';
 
 const MODES: { id: EditorMode; label: string }[] = [
   { id: 'mesh', label: 'Mesh' },
@@ -8,10 +9,10 @@ const MODES: { id: EditorMode; label: string }[] = [
   { id: 'gaussian', label: 'Gaussian' },
 ];
 
-const ACCEPT = '.glb,.gltf,.obj';
-
 export function Toolbar() {
-  const { mode, setMode, loading } = useEditor();
+  const mode = useEditor((s) => s.mode);
+  const setMode = useEditor((s) => s.setMode);
+  const loading = useEditor((s) => s.loading);
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -34,11 +35,12 @@ export function Toolbar() {
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPT}
+        accept={ACCEPT_ATTR}
         multiple
         style={{ display: 'none' }}
         onChange={(e) => {
           void handleFiles(e.target.files);
+          // reset so the same file can be re-selected
           e.target.value = '';
         }}
       />

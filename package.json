@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "smoke": "tsx scripts/smoke-load-gltf.ts"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

@@ -1,6 +1,6 @@
-import { useEditor } from '@/store/editor';
+import { useEditor, type EditorMode } from '@/store/editor';
 
-const MODE_BLURB: Record<string, { title: string; lines: string[] }> = {
+const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
   mesh: {
     title: 'Mesh mode',
     lines: [
@@ -25,58 +25,43 @@ const MODE_BLURB: Record<string, { title: string; lines: string[] }> = {
 };
 
 export function Sidebar() {
-  const { mode, assets, activeAssetId, setActiveAsset, removeAsset } = useEditor();
-  const blurb = MODE_BLURB[mode]!;
+  const mode = useEditor((s) => s.mode);
+  const assets = useEditor((s) => s.assets);
+  const activeAssetId = useEditor((s) => s.activeAssetId);
+  const setActiveAsset = useEditor((s) => s.setActiveAsset);
+  const removeAsset = useEditor((s) => s.removeAsset);
+  const blurb = MODE_BLURB[mode];
 
   return (
     <aside className="sidebar">
       <h3>{blurb.title}</h3>
       <p className="empty">
         {blurb.lines.map((l, i) => (
-          <span key={i} style={{ display: 'block' }}>
+          <span key={i} className="blurb-line">
             {l}
           </span>
         ))}
       </p>
 
-      <h3 style={{ marginTop: 24 }}>Assets ({assets.length})</h3>
+      <h3 className="section-title">Assets ({assets.length})</h3>
       {assets.length === 0 ? (
         <p className="empty">No assets loaded yet.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div className="asset-list">
           {assets.map((a) => (
             <div
               key={a.id}
-              style={{
-                background: a.id === activeAssetId ? 'var(--panel-2)' : 'transparent',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                padding: '6px 8px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
+              className={`asset-row${a.id === activeAssetId ? ' active' : ''}`}
             >
-              <button
-                onClick={() => setActiveAsset(a.id)}
-                style={{
-                  flex: 1,
-                  textAlign: 'left',
-                  background: 'transparent',
-                  border: 'none',
-                  padding: 0,
-                  color: 'var(--text)',
-                  cursor: 'pointer',
-                }}
-              >
-                <div style={{ fontSize: 13 }}>{a.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              <button className="asset-select" onClick={() => setActiveAsset(a.id)}>
+                <div className="asset-name">{a.name}</div>
+                <div className="asset-meta">
                   {a.format} · {(a.size / 1024).toFixed(1)} KB
                 </div>
               </button>
               <button
+                className="asset-remove"
                 onClick={() => removeAsset(a.id)}
-                style={{ padding: '4px 8px', fontSize: 11 }}
                 title="Remove"
               >
                 ×

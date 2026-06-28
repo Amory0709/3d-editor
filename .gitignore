@@ -4,3 +4,7 @@ dist
 *.log
 .vite
 *.tsbuildinfo
+
+# developer tooling that should live in user-level dirs, not in the project
+.agents
+skills-lock.json

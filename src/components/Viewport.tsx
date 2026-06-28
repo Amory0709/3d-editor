@@ -1,36 +1,13 @@
-import { Component, Suspense, useState, type ReactNode } from 'react';
+import { Suspense, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Bounds, Center, GizmoHelper, GizmoViewport, Grid, OrbitControls } from '@react-three/drei';
 import { useEditor } from '@/store/editor';
 import { handleFiles } from '@/lib/upload';
 import { MeshRenderer } from './MeshRenderer';
 import { DemoCube } from './DemoCube';
-
-interface EBProps {
-  children: ReactNode;
-  onError: (e: Error) => void;
-}
-interface EBState {
-  hasError: boolean;
-}
-
-/** Catches loader errors thrown by useGLTF / useLoader and surfaces them. */
-class CanvasErrorBoundary extends Component<EBProps, EBState> {
-  state: EBState = { hasError: false };
-  static getDerivedStateFromError(): EBState {
-    return { hasError: true };
-  }
-  componentDidCatch(error: Error) {
-    this.props.onError(error);
-  }
-  render() {
-    if (this.state.hasError) return null;
-    return this.props.children;
-  }
-}
+import { ErrorBoundary } from './ErrorBoundary';
 
 function LoadingHint() {
-  // visible inside Canvas while mesh loader suspends
   return (
     <Center>
       <mesh>
@@ -68,14 +45,12 @@ function Scene() {
       />
       <axesHelper args={[1.5]} />
 
-      <CanvasErrorBoundary onError={(e) => useEditor.getState().setError(`Load failed: ${e.message}`)}>
-        <Suspense fallback={<LoadingHint />}>
-          {/* key={assetId} forces remount → re-fits camera on asset switch */}
-          <Bounds key={activeAsset?.id ?? 'demo'} fit clip margin={1.4}>
-            {showDemo ? <DemoCube /> : <MeshRenderer asset={activeAsset} />}
-          </Bounds>
-        </Suspense>
-      </CanvasErrorBoundary>
+      <Suspense fallback={<LoadingHint />}>
+        {/* key={assetId} forces remount → re-fits camera on asset switch */}
+        <Bounds key={activeAsset?.id ?? 'demo'} fit clip margin={1.4}>
+          {showDemo ? <DemoCube /> : <MeshRenderer asset={activeAsset} />}
+        </Bounds>
+      </Suspense>
 
       <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
 
@@ -93,6 +68,7 @@ export function Viewport() {
   const [isDragging, setDragging] = useState(false);
   const error = useEditor((s) => s.error);
   const loading = useEditor((s) => s.loading);
+  const setError = useEditor((s) => s.setError);
 
   return (
     <div
@@ -114,21 +90,31 @@ export function Viewport() {
         void handleFiles(e.dataTransfer.files);
       }}
     >
-      <Canvas
-        camera={{ position: [3, 3, 5], fov: 45, near: 0.1, far: 1000 }}
-        dpr={[1, 2]}
+      {/*
+        ErrorBoundary wraps the <Canvas> from OUTSIDE so a thrown loader
+        error tears down the whole Canvas (R3F's reconciler doesn't always
+        unwind cleanly when the boundary lives inside the Canvas tree).
+      */}
+      <ErrorBoundary
+        fallback={(err) => <div className="canvas-crash">⚠ Canvas error: {err.message}</div>}
+        onError={(err) => setError(`Load failed: ${err.message}`)}
       >
-        <Scene />
-      </Canvas>
+        <Canvas
+          camera={{ position: [3, 3, 5], fov: 45, near: 0.1, far: 1000 }}
+          dpr={[1, 2]}
+        >
+          <Scene />
+        </Canvas>
+      </ErrorBoundary>
 
       <div className="overlay">
         Drag to orbit · Right-drag to pan · Scroll to zoom · Drop file to upload
-        {loading && <span style={{ color: 'var(--accent-2)', marginLeft: 12 }}>· loading…</span>}
+        {loading && <span className="loading-tag">· loading…</span>}
       </div>
 
       {error && (
-        <div className="error-banner" onClick={() => useEditor.getState().setError(null)}>
-          ⚠ {error} <span style={{ opacity: 0.6, marginLeft: 8 }}>(click to dismiss)</span>
+        <div className="error-banner" onClick={() => setError(null)}>
+          ⚠ {error} <span className="error-dismiss">(click to dismiss)</span>
         </div>
       )}
 
