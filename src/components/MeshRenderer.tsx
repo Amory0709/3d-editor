@@ -6,18 +6,20 @@ import { MeshStandardMaterial } from 'three';
 import type { AssetRef } from '@/store/editor';
 import { useEditor } from '@/store/editor';
 import { disposeObject3D } from '@/lib/dispose';
+import { PrimitiveRenderer } from './PrimitiveRenderer';
 
-function GLTFMesh({ url }: { url: string }) {
-  const gltf = useGLTF(url);
+function GLTFMesh({ asset }: { asset: AssetRef }) {
+  const gltf = useGLTF(asset.url!);
   // Free GPU buffers when the component unmounts (asset removed / switched).
   useEffect(() => {
     return () => disposeObject3D(gltf.scene);
   }, [gltf.scene]);
+  // Transform is applied by the TransformableAsset wrapper, not here.
   return <primitive object={gltf.scene} />;
 }
 
-function OBJMesh({ url }: { url: string }) {
-  const obj = useLoader(OBJLoader, url);
+function OBJMesh({ asset }: { asset: AssetRef }) {
+  const obj = useLoader(OBJLoader, asset.url!);
 
   // OBJLoader yields meshes with no material assigned — give them a neutral
   // PBR look so the asset isn't pitch black. MTL loading is a phase-3 item.
@@ -38,15 +40,23 @@ function OBJMesh({ url }: { url: string }) {
     };
   }, [obj]);
 
+  // Transform is applied by the TransformableAsset wrapper, not here.
   return <primitive object={obj} />;
 }
 
 /**
- * Renders a mesh asset via GLTFLoader (.glb/.gltf) or OBJLoader (.obj).
+ * Renders a mesh asset. Dispatches between:
+ *  - file assets (glb / gltf / obj)
+ *  - primitive assets (cube / sphere / cylinder)
+ *
  * Must be rendered inside a Canvas, inside a Suspense boundary.
  *
- * TODO(phase 3): <primitive object={scene}> bypasses R3F reconciliation;
- * will need to traverse and recreate meshes in JSX for transform tools.
+ * Transform is NOT applied here — the wrapping <TransformableAsset>
+ * applies it, so the same mesh can be controlled by TransformControls
+ * without compositing transforms.
+ *
+ * TODO(phase 3.1): <primitive object={scene}> bypasses R3F reconciliation;
+ * vertex-level picking will need to traverse and recreate meshes in JSX.
  */
 export function MeshRenderer({ asset }: { asset: AssetRef }) {
   const setLoading = useEditor((s) => s.setLoading);
@@ -59,12 +69,14 @@ export function MeshRenderer({ asset }: { asset: AssetRef }) {
     setLoading(false);
   }, [asset.id, setLoading]);
 
+  if (asset.source === 'primitive') {
+    return <PrimitiveRenderer asset={asset} />;
+  }
   if (asset.format === 'glb' || asset.format === 'gltf') {
-    return <GLTFMesh url={asset.url} />;
+    return <GLTFMesh asset={asset} />;
   }
   if (asset.format === 'obj') {
-    return <OBJMesh url={asset.url} />;
+    return <OBJMesh asset={asset} />;
   }
-  // unsupported format — caller should have filtered via MESH_FORMATS
   return null;
 }

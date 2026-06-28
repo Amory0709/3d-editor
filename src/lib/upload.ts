@@ -1,4 +1,4 @@
-import { useEditor } from '@/store/editor';
+import { useEditor, DEFAULT_TRANSFORM } from '@/store/editor';
 import {
   detectFormat,
   classifyKind,
@@ -42,8 +42,10 @@ export async function handleFiles(files: FileList | null): Promise<void> {
       url,
       format,
       kind: classifyKind(format),
+      source: 'file',
       size: file.size,
       loadedAt: Date.now(),
+      transform: { ...DEFAULT_TRANSFORM },
     });
     added++;
   }

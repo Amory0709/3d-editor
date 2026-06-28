@@ -15,6 +15,15 @@ export type AssetFormat =
 
 export type AssetKind = 'mesh' | 'gaussian';
 
+/** Procedural geometry types (phase 3). */
+export type PrimitiveType = 'cube' | 'sphere' | 'cylinder';
+
+export const PRIMITIVE_TYPES: readonly PrimitiveType[] = [
+  'cube',
+  'sphere',
+  'cylinder',
+] as const;
+
 /** Formats the mesh renderer (phase 2) can show today. */
 export const MESH_FORMATS: ReadonlySet<AssetFormat> = new Set<AssetFormat>([
   'glb',
@@ -51,4 +60,9 @@ export function detectFormat(name: string): AssetFormat {
 /** Map a format to its renderer bucket. */
 export function classifyKind(format: AssetFormat): AssetKind {
   return GAUSSIAN_FORMATS.has(format) ? 'gaussian' : 'mesh';
+}
+
+/** Display label for a primitive type. */
+export function primitiveLabel(p: PrimitiveType): string {
+  return p.charAt(0).toUpperCase() + p.slice(1);
 }

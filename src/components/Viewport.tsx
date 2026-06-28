@@ -1,11 +1,21 @@
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Bounds, Center, GizmoHelper, GizmoViewport, Grid, OrbitControls } from '@react-three/drei';
+import {
+  Bounds,
+  Center,
+  GizmoHelper,
+  GizmoViewport,
+  Grid,
+  OrbitControls,
+  TransformControls,
+} from '@react-three/drei';
+import type { Group } from 'three';
 import { useEditor } from '@/store/editor';
 import { handleFiles } from '@/lib/upload';
-import { MeshRenderer } from './MeshRenderer';
+import { TransformableAsset } from './TransformableAsset';
 import { DemoCube } from './DemoCube';
 import { ErrorBoundary } from './ErrorBoundary';
+import { useEditorShortcuts } from '@/lib/keyboard';
 
 function LoadingHint() {
   return (
@@ -18,11 +28,23 @@ function LoadingHint() {
   );
 }
 
-function Scene() {
+function Scene({ refitNonce }: { refitNonce: number }) {
   const activeAsset = useEditor((s) =>
     s.activeAssetId ? s.assets.find((a) => a.id === s.activeAssetId) ?? null : null,
   );
+  const transformMode = useEditor((s) => s.transformMode);
+  const setAssetTransform = useEditor((s) => s.setAssetTransform);
   const showDemo = !activeAsset;
+
+  // Ref to the controlled group so TransformControls can attach to it.
+  // We use a callback ref that triggers a state update so TransformControls
+  // renders AFTER the group has mounted (otherwise its `object` prop is null).
+  const [groupObj, setGroupObj] = useState<Group | null>(null);
+
+  // The Bounds key only changes when refitNonce changes — i.e. on the very
+  // first asset load (set by parent) or when the user presses F. Asset
+  // switches no longer trigger a camera snap.
+  const boundsKey = `fit-${refitNonce}`;
 
   return (
     <>
@@ -46,11 +68,42 @@ function Scene() {
       <axesHelper args={[1.5]} />
 
       <Suspense fallback={<LoadingHint />}>
-        {/* key={assetId} forces remount → re-fits camera on asset switch */}
-        <Bounds key={activeAsset?.id ?? 'demo'} fit clip margin={1.4}>
-          {showDemo ? <DemoCube /> : <MeshRenderer asset={activeAsset} />}
+        <Bounds key={boundsKey} fit clip margin={1.4}>
+          {showDemo ? (
+            <DemoCube />
+          ) : (
+            <TransformableAsset asset={activeAsset} ref={setGroupObj} />
+          )}
         </Bounds>
       </Suspense>
+
+      {/*
+        TransformControls sits OUTSIDE Bounds so the gizmo helpers don't
+        inflate the bounding-box calculation. It attaches to the same group
+        that Bounds is fitting to, so transforms happen in the same frame.
+      */}
+      {groupObj && activeAsset && (
+        <TransformControls
+          object={groupObj}
+          mode={transformMode}
+          size={0.8}
+          onObjectChange={() => {
+            setAssetTransform(activeAsset.id, {
+              position: [
+                groupObj.position.x,
+                groupObj.position.y,
+                groupObj.position.z,
+              ],
+              rotation: [
+                groupObj.rotation.x,
+                groupObj.rotation.y,
+                groupObj.rotation.z,
+              ],
+              scale: [groupObj.scale.x, groupObj.scale.y, groupObj.scale.z],
+            });
+          }}
+        />
+      )}
 
       <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
 
@@ -66,9 +119,26 @@ function Scene() {
 
 export function Viewport() {
   const [isDragging, setDragging] = useState(false);
+  const [refitNonce, setRefitNonce] = useState(0);
   const error = useEditor((s) => s.error);
   const loading = useEditor((s) => s.loading);
   const setError = useEditor((s) => s.setError);
+  const activeAssetId = useEditor((s) => s.activeAssetId);
+
+  // Auto-fit camera on the first asset upload (not on every switch).
+  // See README follow-up "Bounds camera flash" — this is the phase-3 fix.
+  const hasFitFirstAssetRef = useRef(false);
+  useEffect(() => {
+    if (activeAssetId && !hasFitFirstAssetRef.current) {
+      hasFitFirstAssetRef.current = true;
+      setRefitNonce((n) => n + 1);
+    }
+  }, [activeAssetId]);
+
+  // F key → manual re-fit.
+  useEditorShortcuts({
+    onRefit: () => setRefitNonce((n) => n + 1),
+  });
 
   return (
     <div
@@ -81,7 +151,6 @@ export function Viewport() {
         e.preventDefault();
       }}
       onDragLeave={(e) => {
-        // only clear when leaving the viewport itself, not when crossing child boundaries
         if (e.currentTarget === e.target) setDragging(false);
       }}
       onDrop={(e) => {
@@ -90,11 +159,6 @@ export function Viewport() {
         void handleFiles(e.dataTransfer.files);
       }}
     >
-      {/*
-        ErrorBoundary wraps the <Canvas> from OUTSIDE so a thrown loader
-        error tears down the whole Canvas (R3F's reconciler doesn't always
-        unwind cleanly when the boundary lives inside the Canvas tree).
-      */}
       <ErrorBoundary
         fallback={(err) => <div className="canvas-crash">⚠ Canvas error: {err.message}</div>}
         onError={(err) => setError(`Load failed: ${err.message}`)}
@@ -103,12 +167,12 @@ export function Viewport() {
           camera={{ position: [3, 3, 5], fov: 45, near: 0.1, far: 1000 }}
           dpr={[1, 2]}
         >
-          <Scene />
+          <Scene refitNonce={refitNonce} />
         </Canvas>
       </ErrorBoundary>
 
       <div className="overlay">
-        Drag to orbit · Right-drag to pan · Scroll to zoom · Drop file to upload
+        <span>W/E/R translate/rotate/scale · F refit · Esc deselect · Drop file to upload</span>
         {loading && <span className="loading-tag">· loading…</span>}
       </div>
 

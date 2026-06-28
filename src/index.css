@@ -152,6 +152,33 @@ button.primary:hover { filter: brightness(1.08); }
   font-size: 11px;
 }
 
+.sidebar .primitive-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.sidebar .primitive-btn {
+  font-size: 12px;
+  padding: 8px 6px;
+}
+
+.sidebar .transform-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar .transform-btn {
+  text-align: left;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.sidebar .transform-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0a0d14;
+  font-weight: 600;
+}
+
 .viewport {
   position: relative;
   background: #0a0c12;
