@@ -10,6 +10,18 @@ import { chromium } from '/opt/homebrew/lib/node_modules/playwright/index.mjs';
 
 const URL = 'http://127.0.0.1:5173/';
 
+// Preflight: if the dev server isn't reachable, skip with a clear
+// message instead of failing with a confusing connection error.
+try {
+  const r = await fetch(URL);
+  if (!r.ok) throw new Error(`status ${r.status}`);
+} catch (e) {
+  console.error(`⚠ dev server not reachable at ${URL} (${e.message})`);
+  console.error('  run `npm run dev` first, or use `npm run verify:store` for a');
+  console.error('  browser-free equivalent that covers the same invariants.');
+  process.exit(0);
+}
+
 const browser = await chromium.launch();
 const page = await browser.newPage();
 

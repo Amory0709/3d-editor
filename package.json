@@ -10,7 +10,8 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "smoke": "tsx scripts/smoke-load-gltf.ts"
+    "smoke": "tsx scripts/smoke-load-gltf.ts",
+    "verify:store": "tsx --tsconfig ./tsconfig.app.json scripts/verify-store.mts"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",
