@@ -9,11 +9,10 @@
  *   • when an asset is removed or its collider cleared, the body is
  *     removed too
  *
- * Sync is one-way: editor → physics. Bodies are static (mass=0) so the
- * world's step() does not mutate them. Phase 4d (play mode) will flip
- * them dynamic; phase 4e (collision events) will surface beginContact.
- * For now the world is just a live in-memory representation that those
- * future features can hook into without restructuring the loop.
+ * Sync is one-way: editor → physics in edit mode; in play mode
+ * (phase 4d) bodies become dynamic and the world.step() drives them,
+ * with the body's transform flowing back into the asset each frame.
+ * Phase 4e (collision events) will surface beginContact on top of this.
  *
  * The world is a module-level singleton. There is one editor, so one
  * world is correct. `resetPhysicsWorld()` is exposed for test isolation

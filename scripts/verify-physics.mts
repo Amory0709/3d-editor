@@ -39,6 +39,17 @@ function v3eq(
 
 function reset(): void {
   useEditor.getState().resetHistoryForTest();
+  // Phase 4d: also reset playMode + activeAssetId so a test that left
+  // play running (or selection set) doesn't pollute the next case.
+  // We mutate the flag directly via setState rather than going through
+  // setPlayMode() because we want the WORLD to be re-synced from edit
+  // (static) state, not play-state.
+  if (useEditor.getState().playMode) {
+    useEditor.setState({ playMode: false, activeAssetId: null });
+    syncBodies(useEditor.getState().assets, false);
+  } else {
+    useEditor.setState({ activeAssetId: null });
+  }
   // Wipe assets via removeAsset in a loop; resetHistoryForTest doesn't
   // touch the assets array itself.
   const ids = useEditor.getState().assets.map((a) => a.id);
@@ -784,7 +795,7 @@ function reset(): void {
   }
   check(
     '26c. after play + body→store write, asset position is no longer (10,20,30)',
-    useEditor.getState().assets[0].transform.position[1] !== 20,
+    useEditor.getState().assets[0].transform.position[1] !== 30,
     `y=${useEditor.getState().assets[0].transform.position[1]}`,
   );
   // Exit play: does NOT push another history entry.
@@ -847,6 +858,102 @@ function reset(): void {
     `pos.x=${useEditor.getState().assets[0].transform.position[0]}`,
   );
   useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 29: store guards against mid-play mutations ─────────────
+// Phase 4d defense-in-depth: UI disables most actions in play, but
+// programmatic calls (or future shortcuts) could still hit these
+// actions. The store must no-op them so the simulation stays sane.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setPlayMode(true);
+
+  // removeAsset should be a no-op.
+  const beforeAssets = useEditor.getState().assets.length;
+  useEditor.getState().removeAsset(id);
+  check(
+    '29a. removeAsset is a no-op in play mode',
+    useEditor.getState().assets.length === beforeAssets,
+    `assets ${beforeAssets}→${useEditor.getState().assets.length}`,
+  );
+
+  // addPrimitive should be a no-op.
+  useEditor.getState().addPrimitive('sphere');
+  check(
+    '29b. addPrimitive is a no-op in play mode',
+    useEditor.getState().assets.length === beforeAssets,
+    `assets ${beforeAssets}→${useEditor.getState().assets.length}`,
+  );
+
+  // setAssetCollider should be a no-op.
+  // Pre-condition: collider starts as null (no collider set yet).
+  check(
+    '29c-pre. collider starts as null (cube added without collider)',
+    useEditor.getState().assets[0].collider === null,
+  );
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
+  check(
+    '29c. setAssetCollider is a no-op in play mode',
+    useEditor.getState().assets[0].collider === null,
+    `collider=${JSON.stringify(useEditor.getState().assets[0].collider)}`,
+  );
+
+  // setMode should be a no-op.
+  const modeBefore = useEditor.getState().mode;
+  useEditor.getState().setMode('gaussian');
+  check(
+    '29d. setMode is a no-op in play mode',
+    useEditor.getState().mode === modeBefore,
+    `mode ${modeBefore}→${useEditor.getState().mode}`,
+  );
+
+  // undo / redo should be no-ops (they would teleport bodies).
+  const pastBefore = useEditor.getState().history.past.length;
+  useEditor.getState().undo();
+  useEditor.getState().redo();
+  check(
+    '29e. undo / redo are no-ops in play mode',
+    useEditor.getState().history.past.length === pastBefore,
+    `past ${pastBefore}→${useEditor.getState().history.past.length}`,
+  );
+
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 30: reset() resets playMode (test infrastructure) ─────
+// Phase 4d: if a previous test left playMode = true, the next test's
+// reset() must clear it so the assertions don't see a polluted store.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  useEditor.getState().setPlayMode(true);
+  // Sanity: playMode is now true.
+  check(
+    '30a. setUp: playMode is true',
+    useEditor.getState().playMode === true,
+  );
+  reset();
+  check(
+    '30b. reset() clears playMode',
+    useEditor.getState().playMode === false,
+  );
+  // And bodies are re-synced as static (syncBodies called with false).
+  const id = useEditor.getState().activeAssetId ?? useEditor.getState().assets[0]?.id;
+  // After reset() activeAssetId is null, so re-add to test body state.
+  useEditor.getState().addPrimitive('cube');
+  useEditor.getState().setAssetCollider(
+    useEditor.getState().activeAssetId!,
+    DEFAULT_COLLIDER.box,
+  );
+  syncBodies(useEditor.getState().assets, false);
+  const body = getBodyForAsset(useEditor.getState().activeAssetId!)!;
+  check(
+    '30c. after reset() + edit sync, body is static (mass=0, STATIC)',
+    body.mass === 0 && body.type === CANNON.Body.STATIC,
+    `mass=${body.mass} type=${body.type}`,
+  );
 }
 
 // ─── Summary ──────────────────────────────────────────────────────

@@ -14,9 +14,9 @@ import {
  *
  *   • Edit mode (4b): one-way editor → physics. `syncBodies` pulls
  *     the latest assets and updates each body's transform; bodies
- *     are static so `stepWorld` is a no-op. This keeps the engine
- *     "live" so future features (raycast pick, collision events)
- *     can hook in without restructuring the loop.
+ *     are static (mass = 0) so there's nothing to step. The world
+ *     stays queryable for future features (raycast pick, collision
+ *     events) without per-frame work.
  *
  *   • Play mode (4d): one-way physics → editor. `syncBodies` flips
  *     bodies dynamic and stops touching their transforms.
@@ -35,18 +35,17 @@ export function PhysicsTicker(): null {
     if (state.playMode) {
       // Play mode: bodies drive their own transform. After the step,
       // read each body back into the store so the visual layer can
-      // follow.
+      // follow. The next setPlayMode(false) call will leave assets
+      // already at the body's final position.
       stepWorld(dt);
       const updates = readBodiesToAssets();
       for (const u of updates) {
         state.setAssetTransformFromPlay(u.assetId, u.position, u.rotation);
       }
-    } else {
-      // Edit mode: keep the world "live" by stepping (no-op for
-      // static bodies, but future dynamic-mixed cases can hook in
-      // without a loop restructure).
-      stepWorld(dt);
     }
+    // Edit mode: no step. Bodies are static — `syncBodies` already
+    // pushed the asset's transform into the body. Stepping a static
+    // world is a provable no-op.
   });
   return null;
 }

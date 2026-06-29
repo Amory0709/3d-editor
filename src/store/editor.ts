@@ -210,26 +210,46 @@ function transformsEqual(
 
 export const useEditor = create<EditorState>((set, get) => ({
   mode: 'mesh',
-  setMode: (mode) => set({ mode }),
+  setMode: (mode) =>
+    set((s) => {
+      // Phase 4d safety net: switching modes mid-play would change
+      // which sidebar panels are visible (e.g. the Collider editor),
+      // and any pending numeric edit would commit against the wrong
+      // UI shape. UI disables mode tabs in play; this guard matches.
+      if (s.playMode) return s;
+      return { mode };
+    }),
 
   assets: [],
   activeAssetId: null,
   history: { past: [], future: [] },
 
   addAsset: (asset) =>
-    set((s) => ({
-      history: snapshotHistory(s.history, s.assets),
-      assets: [...s.assets, asset],
-      activeAssetId: asset.id,
-      // Refit on every new asset upload. Phase-3 review fix: a single
-      // 'first fit' rule left OBJ uploads and post-clear re-uploads
-      // unfitted. We don't refit on selection switch or removal —
-      // just on add.
-      refitRequestNonce: s.refitRequestNonce + 1,
-    })),
+    set((s) => {
+      // Phase 4d safety net: the UI disables the upload button in
+      // play, but we guard here too in case anything ever calls addAsset
+      // programmatically (keyboard shortcut, drag-drop race, test).
+      // Adding a static asset under a live dynamic world is incoherent.
+      if (s.playMode) return s;
+      return {
+        history: snapshotHistory(s.history, s.assets),
+        assets: [...s.assets, asset],
+        activeAssetId: asset.id,
+        // Refit on every new asset upload. Phase-3 review fix: a single
+        // 'first fit' rule left OBJ uploads and post-clear re-uploads
+        // unfitted. We don't refit on selection switch or removal —
+        // just on add.
+        refitRequestNonce: s.refitRequestNonce + 1,
+      };
+    }),
 
   removeAsset: (id) =>
     set((s) => {
+      // Phase 4d safety net: UI disables the row's × in play mode,
+      // but we guard here so a programmatic call can't yank an asset
+      // out from under its body mid-simulation. Caller should
+      // setPlayMode(false) first.
+      if (s.playMode) return s;
       const target = s.assets.find((a) => a.id === id);
       if (target?.url) URL.revokeObjectURL(target.url);
       const remaining = s.assets.filter((a) => a.id !== id);
@@ -306,10 +326,17 @@ export const useEditor = create<EditorState>((set, get) => ({
     })),
 
   setAssetCollider: (id, collider) =>
-    set((s) => ({
-      history: snapshotHistory(s.history, s.assets),
-      assets: s.assets.map((a) => (a.id === id ? { ...a, collider } : a)),
-    })),
+    set((s) => {
+      // Phase 4d safety net: cannon-es can't reliably rebuild a body
+      // (or change its shape) mid-step, and the syncBodies path would
+      // either crash or leak. UI disables the collider picker AND the
+      // numeric editor in play; this guard is belt-and-suspenders.
+      if (s.playMode) return s;
+      return {
+        history: snapshotHistory(s.history, s.assets),
+        assets: s.assets.map((a) => (a.id === id ? { ...a, collider } : a)),
+      };
+    }),
 
   playMode: false,
   setPlayMode: (play) => {
@@ -367,13 +394,19 @@ export const useEditor = create<EditorState>((set, get) => ({
       transform: { ...DEFAULT_TRANSFORM },
       collider: null,
     };
-    set((s) => ({
-      history: snapshotHistory(s.history, s.assets),
-      assets: [...s.assets, asset],
-      activeAssetId: id,
-      // Match addAsset: every new asset upload triggers a refit.
-      refitRequestNonce: s.refitRequestNonce + 1,
-    }));
+    set((s) => {
+      // Phase 4d safety net: same as addAsset — primitives add an
+      // asset, which is incoherent mid-simulation. UI disables the
+      // primitive buttons in play.
+      if (s.playMode) return s;
+      return {
+        history: snapshotHistory(s.history, s.assets),
+        assets: [...s.assets, asset],
+        activeAssetId: id,
+        // Match addAsset: every new asset upload triggers a refit.
+        refitRequestNonce: s.refitRequestNonce + 1,
+      };
+    });
   },
 
   transformMode: 'translate',
@@ -388,8 +421,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((s) => ({ axisLock: s.axisLock === axis ? null : axis })),
 
   undo: () => {
-    const { history, assets, activeAssetId } = get();
+    const { history, assets, activeAssetId, playMode } = get();
     if (history.past.length === 0) return;
+    // Phase 4d: undo during play would restore an old asset transform,
+    // and the next syncBodies would teleport every body to that old
+    // position — visually confusing. Play is a sandbox: the only
+    // legitimate undo target is the pre-play snapshot, which the user
+    // reaches after Stop. UI also disables the undo button.
+    if (playMode) return;
     const prev = history.past[history.past.length - 1];
     const nextPast = history.past.slice(0, -1);
     set({
@@ -405,8 +444,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   redo: () => {
-    const { history, assets, activeAssetId } = get();
+    const { history, assets, activeAssetId, playMode } = get();
     if (history.future.length === 0) return;
+    // Phase 4d: same reasoning as undo — no redo during play.
+    if (playMode) return;
     const next = history.future[0];
     const rest = history.future.slice(1);
     set({

@@ -84,7 +84,7 @@ export function Sidebar() {
         <button
           className="history-btn"
           onClick={undo}
-          disabled={!canUndo}
+          disabled={!canUndo || playMode}
           title="Undo (⌘Z)"
         >
           ↶ Undo
@@ -92,7 +92,7 @@ export function Sidebar() {
         <button
           className="history-btn"
           onClick={redo}
-          disabled={!canRedo}
+          disabled={!canRedo || playMode}
           title="Redo (⌘⇧Z)"
         >
           ↷ Redo
