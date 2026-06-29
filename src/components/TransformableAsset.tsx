@@ -31,7 +31,7 @@ export const TransformableAsset = forwardRef<Group, Props>(
       scale={asset.transform.scale}
     >
       <MeshRenderer asset={asset} />
-      {asset.collider && <ColliderMarker type={asset.collider.type} />}
+      {asset.collider && <ColliderMarker spec={asset.collider} />}
     </group>
   ),
 );

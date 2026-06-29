@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import { GAUSSIAN_FORMATS, type AssetFormat, type AssetKind, type PrimitiveType } from '@/lib/formats';
+import {
+  GAUSSIAN_FORMATS,
+  type AssetFormat,
+  type AssetKind,
+  type ColliderSpec,
+  type PrimitiveType,
+} from '@/lib/formats';
 
 /** Object transform in world space, stored per asset. */
 export interface ObjectTransform {
@@ -20,10 +26,10 @@ export type EditorMode = 'mesh' | 'collision' | 'gaussian';
 
 export type AxisLock = 'x' | 'y' | 'z' | null;
 
-/** Per-asset collider (phase 4a). null = no collider set. */
-export interface ColliderSpec {
-  type: 'box' | 'sphere' | 'capsule' | 'cylinder';
-}
+/** Per-asset collider (phase 4a / 4b). null = no collider set.
+ *  The actual shape is a discriminated union in lib/formats — re-exported
+ *  here as a type alias for the asset record. */
+export type { ColliderSpec } from '@/lib/formats';
 
 export interface AssetRef {
   /** stable id used as R3F key + state lookup */

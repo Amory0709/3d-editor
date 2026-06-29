@@ -7,30 +7,24 @@ import {
   SphereGeometry,
   type BufferGeometry,
 } from 'three';
-import type { ColliderType } from '@/lib/formats';
+import type { ColliderSpec } from '@/lib/formats';
 
 /**
- * Visual collider marker (phase 4a). Renders a wireframe primitive
- * sized to match the type's default extents. The marker has no
- * collider of its own — collisions are computed externally. Its only
- * job is to show "this is where the collider would be" with a clear
- * visual that doesn't fight the asset's own material.
+ * Visual collider marker. Renders a wireframe primitive matching the
+ * collider spec's size parameters (cyan edges, depth-test off so the
+ * marker stays visible through the asset mesh).
  *
- * Sizing convention (units = scene units, ~meters):
- *   - box:      1.0 × 1.0 × 1.0  (matches primitive cube default)
- *   - sphere:   radius 0.6        (matches primitive sphere default)
- *   - capsule:  radius 0.4, length 1.2 (axis = Y, hemispheres included)
- *   - cylinder: radius 0.5, height 1.2 (matches primitive cylinder default)
- *
- * Custom halfExtents / radius / height will arrive in phase 4b when
- * physics integration needs them; for now the default size keeps the
- * marker roughly aligned with the visible mesh bounds for primitives.
+ * Phase 4b: the marker is sized from the same `ColliderSpec` that the
+ * physics body uses, so what the user sees and what the physics sees
+ * stay in sync. Scale is intentionally NOT applied here — the marker
+ * lives inside the asset's TransformableAsset group, so the group
+ * transform handles scale automatically.
  */
-export function ColliderMarker({ type }: { type: ColliderType }) {
-  // Build the underlying geometry once per type, derive an EdgesGeometry
+export function ColliderMarker({ spec }: { spec: ColliderSpec }) {
+  // Build the underlying geometry once per spec, derive an EdgesGeometry
   // for the wireframe, and dispose both on unmount to keep GPU memory
   // tight (CapsuleGeometry in particular allocates a lot of vertices).
-  const { source, edges } = useMemo(() => buildMarker(type), [type]);
+  const { source, edges } = useMemo(() => buildMarker(spec), [spec]);
 
   useEffect(() => {
     return () => {
@@ -53,25 +47,28 @@ export function ColliderMarker({ type }: { type: ColliderType }) {
   );
 }
 
-function buildMarker(type: ColliderType): {
+function buildMarker(spec: ColliderSpec): {
   source: BufferGeometry;
   edges: EdgesGeometry;
 } {
   let source: BufferGeometry;
-  switch (type) {
-    case 'box':
-      source = new BoxGeometry(1, 1, 1);
+  switch (spec.type) {
+    case 'box': {
+      // BoxGeometry's size arg is the full side length, not halfExtents.
+      const [hx, hy, hz] = spec.halfExtents;
+      source = new BoxGeometry(hx * 2, hy * 2, hz * 2);
       break;
+    }
     case 'sphere':
-      source = new SphereGeometry(0.6, 24, 16);
+      source = new SphereGeometry(spec.radius, 24, 16);
       break;
     case 'capsule':
-      // Capsule is along Y; length is the cylinder portion, hemispheres
-      // add `radius` on each end.
-      source = new CapsuleGeometry(0.4, 1.2, 8, 16);
+      // CapsuleGeometry is along Y. Length arg is the cylinder portion;
+      // hemispheres add `radius` on each end.
+      source = new CapsuleGeometry(spec.radius, spec.height, 8, 16);
       break;
     case 'cylinder':
-      source = new CylinderGeometry(0.5, 0.5, 1.2, 24);
+      source = new CylinderGeometry(spec.radius, spec.radius, spec.height, 24);
       break;
   }
   // 1° threshold so flat-shaded faces still get edges (capsule + cylinder).

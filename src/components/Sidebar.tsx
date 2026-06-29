@@ -1,5 +1,5 @@
 import { useEditor, type TransformMode, type EditorMode, type AxisLock } from '@/store/editor';
-import { PRIMITIVE_TYPES, primitiveLabel, COLLIDER_TYPES, colliderLabel } from '@/lib/formats';
+import { PRIMITIVE_TYPES, primitiveLabel, COLLIDER_TYPES, colliderLabel, DEFAULT_COLLIDER } from '@/lib/formats';
 
 const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
   mesh: {
@@ -42,6 +42,38 @@ const AXES: Array<Exclude<AxisLock, null>> = ['x', 'y', 'z'];
 /** Format a transform triple as "1.20, 0.00, -0.50" for compact display. */
 function fmt3(v: readonly [number, number, number]): string {
   return v.map((n) => n.toFixed(2)).join(', ');
+}
+
+/** Format a collider spec as a few read-only rows for the sidebar. */
+function formatCollider(
+  c: import('@/lib/formats').ColliderSpec,
+): Array<{ label: string; value: string }> {
+  switch (c.type) {
+    case 'box':
+      return [
+        { label: 'type', value: c.type },
+        { label: 'half-X', value: c.halfExtents[0].toFixed(2) },
+        { label: 'half-Y', value: c.halfExtents[1].toFixed(2) },
+        { label: 'half-Z', value: c.halfExtents[2].toFixed(2) },
+      ];
+    case 'sphere':
+      return [
+        { label: 'type', value: c.type },
+        { label: 'radius', value: c.radius.toFixed(2) },
+      ];
+    case 'capsule':
+      return [
+        { label: 'type', value: c.type },
+        { label: 'radius', value: c.radius.toFixed(2) },
+        { label: 'height', value: c.height.toFixed(2) },
+      ];
+    case 'cylinder':
+      return [
+        { label: 'type', value: c.type },
+        { label: 'radius', value: c.radius.toFixed(2) },
+        { label: 'height', value: c.height.toFixed(2) },
+      ];
+  }
 }
 
 export function Sidebar() {
@@ -189,7 +221,7 @@ export function Sidebar() {
                 <button
                   key={c}
                   className={`collider-btn${activeAsset.collider?.type === c ? ' active' : ''}`}
-                  onClick={() => setAssetCollider(activeAsset.id, { type: c })}
+                  onClick={() => setAssetCollider(activeAsset.id, DEFAULT_COLLIDER[c])}
                 >
                   {colliderLabel(c)}
                 </button>
@@ -199,6 +231,35 @@ export function Sidebar() {
             <p className="empty section-empty">
               Select an asset to assign a collider.
             </p>
+          )}
+          {/*
+            Phase 4b: surface the active spec's size as a read-only
+            summary, and a one-click "Reset to defaults" if the user
+            wants to revert after a future manual override. Numeric
+            edit is a follow-up — the physics test surface is what
+            matters for 4b.
+          */}
+          {activeAsset?.collider && (
+            <div className="collider-vals">
+              {formatCollider(activeAsset.collider).map((line) => (
+                <div className="collider-vals-row" key={line.label}>
+                  <span className="collider-vals-label">{line.label}</span>
+                  <span className="collider-vals-text">{line.value}</span>
+                </div>
+              ))}
+              <button
+                className="reset-btn"
+                onClick={() =>
+                  setAssetCollider(
+                    activeAsset.id,
+                    DEFAULT_COLLIDER[activeAsset.collider!.type],
+                  )
+                }
+                title="Reset collider dimensions to defaults"
+              >
+                ⟲ Reset to defaults
+              </button>
+            </div>
           )}
         </>
       )}

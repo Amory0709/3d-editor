@@ -15,6 +15,7 @@ import { handleFiles } from '@/lib/upload';
 import { TransformableAsset } from './TransformableAsset';
 import { DemoCube } from './DemoCube';
 import { ErrorBoundary } from './ErrorBoundary';
+import { PhysicsTicker } from './PhysicsTicker';
 import { useEditorShortcuts } from '@/lib/keyboard';
 
 function LoadingHint() {
@@ -139,6 +140,12 @@ function Scene({ refitNonce }: { refitNonce: number }) {
       )}
 
       <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
+
+      {/*
+        Phase 4b: headless tick that reconciles + steps the physics
+        world each frame. Must be inside <Canvas> to access useFrame.
+      */}
+      <PhysicsTicker />
 
       <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
         <GizmoViewport

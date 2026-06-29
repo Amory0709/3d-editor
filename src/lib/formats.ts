@@ -66,7 +66,7 @@ export function classifyKind(format: AssetFormat): AssetKind {
   return GAUSSIAN_FORMATS.has(format) ? 'gaussian' : 'mesh';
 }
 
-/* ───────────────────────── colliders (phase 4a) ───────────────────────── */
+/* ───────────────────────── colliders (phase 4a / 4b) ───────────────────────── */
 
 export type ColliderType = 'box' | 'sphere' | 'capsule' | 'cylinder';
 
@@ -82,10 +82,28 @@ export function colliderLabel(t: ColliderType): string {
 }
 
 /**
- * Phase 4a: colliders are visual-only markers. They have a fixed default
- * size per type. Custom halfExtents / radius / height will be added in
- * phase 4b when physics integration ships.
+ * Phase 4b: each collider spec carries the size parameters it needs.
+ * Discriminated union — TypeScript narrows on `type` so the right
+ * fields are required for the right shape. No more empty `{ type }`.
+ *
+ * Sizing convention (units = scene units, ~meters):
+ *   - box:      halfExtents in local space (full size = 2 × halfExtents)
+ *   - sphere:   radius
+ *   - capsule:  radius + height of the cylinder portion (hemispheres
+ *               add `radius` on each end → total length = height + 2r)
+ *   - cylinder: radius + height along Y
  */
-export interface ColliderSpec {
-  type: ColliderType;
-}
+export type ColliderSpec =
+  | { type: 'box'; halfExtents: [number, number, number] }
+  | { type: 'sphere'; radius: number }
+  | { type: 'capsule'; radius: number; height: number }
+  | { type: 'cylinder'; radius: number; height: number };
+
+/** Default sizes per type — chosen to match the visible primitive
+ *  defaults so a freshly-assigned collider hugs the mesh. */
+export const DEFAULT_COLLIDER: Record<ColliderType, ColliderSpec> = {
+  box:      { type: 'box',      halfExtents: [0.5, 0.5, 0.5] },
+  sphere:   { type: 'sphere',   radius: 0.6 },
+  capsule:  { type: 'capsule',  radius: 0.4, height: 1.2 },
+  cylinder: { type: 'cylinder', radius: 0.5, height: 1.2 },
+};
