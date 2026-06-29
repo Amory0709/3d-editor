@@ -35,6 +35,7 @@ function Scene({ refitNonce }: { refitNonce: number }) {
   );
   const transformMode = useEditor((s) => s.transformMode);
   const axisLock = useEditor((s) => s.axisLock);
+  const playMode = useEditor((s) => s.playMode);
   const setAssetTransform = useEditor((s) => s.setAssetTransform);
   const setAssetTransformLive = useEditor((s) => s.setAssetTransformLive);
   const commitTransformDrag = useEditor((s) => s.commitTransformDrag);
@@ -115,6 +116,10 @@ function Scene({ refitNonce }: { refitNonce: number }) {
           showX={axisLock === null || axisLock === 'x'}
           showY={axisLock === null || axisLock === 'y'}
           showZ={axisLock === null || axisLock === 'z'}
+          // Phase 4d: gizmo stays visible in play mode (so the user
+          // sees where the asset ended up) but is disabled. Physics
+          // is the source of truth during play.
+          enabled={!playMode}
           onMouseDown={() => {
             // Capture the pre-drag assets snapshot. Read from the store
             // directly (not from a React selector) to avoid stale-closure

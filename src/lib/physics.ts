@@ -20,6 +20,7 @@
  * (and for a future "Clear physics" debug action).
  */
 import * as CANNON from 'cannon-es';
+import { Euler, Quaternion, type EulerOrder } from 'three';
 import type { AssetRef, ObjectTransform } from '@/store/editor';
 import type { ColliderSpec } from '@/lib/formats';
 
@@ -69,15 +70,19 @@ export function getBodyCount(): number {
  * Reconcile the physics world against the current asset list.
  *
  * For each asset with a collider:
- *   • no body OR shape changed since last sync → build a new body
- *     (cheap for our handful of bodies; avoids fiddly per-shape
- *     in-place mutation across the four shape types)
- *   • body exists with same shape → just update position / quaternion
+ *   • no body OR shape / dynamicity changed since last sync → build
+ *     a new body (cheap for our handful of bodies; avoids fiddly
+ *     per-shape in-place mutation across the four shape types)
+ *   • body exists with same shape and dynamicity →
+ *     - in edit mode: update the body's transform to follow the
+ *       asset (one-way: editor → physics)
+ *     - in play mode: leave the body alone (it's the source of
+ *       truth; the asset reads from it after each step)
  *
  * For each body whose asset no longer exists or no longer has a
  * collider → remove it.
  */
-export function syncBodies(assets: readonly AssetRef[]): void {
+export function syncBodies(assets: readonly AssetRef[], dynamic: boolean): void {
   const w = getPhysicsWorld();
   // Track asset IDs that should have a body (i.e. have a non-null
   // collider). After the pass, any body whose asset isn't in this set
@@ -88,23 +93,25 @@ export function syncBodies(assets: readonly AssetRef[]): void {
     if (!asset.collider) continue;
     shouldHaveBody.add(asset.id);
 
-    const key = shapeKey(asset.collider, asset.transform.scale);
+    const key = shapeKey(asset.collider, asset.transform.scale, dynamic);
     let body = bodyByAssetId.get(asset.id);
     const prevKey = lastShapeKey.get(asset.id);
 
     if (!body || prevKey !== key) {
-      // Shape changed (or first time) → rebuild
+      // Shape / dynamicity changed (or first time) → rebuild
       if (body) {
         w.removeBody(body);
       }
-      body = buildBody(asset.collider, asset.transform);
+      body = buildBody(asset.collider, asset.transform, dynamic);
       w.addBody(body);
       bodyByAssetId.set(asset.id, body);
       lastShapeKey.set(asset.id, key);
-    } else {
-      // Same shape, just update transform
+    } else if (!dynamic) {
+      // Edit mode: same shape, just update transform to track the asset.
       updateBodyTransform(body, asset.transform);
     }
+    // Play mode: same shape, dynamic body — leave the body's own
+    // transform alone; syncBodiesFromWorld() will read it back.
   }
 
   // Remove bodies for assets that disappeared, OR for assets still
@@ -116,6 +123,54 @@ export function syncBodies(assets: readonly AssetRef[]): void {
       lastShapeKey.delete(id);
     }
   }
+}
+
+/**
+ * For play mode: read each body's position and rotation out of the
+ * world and return them keyed by asset id. Caller is responsible for
+ * writing the returned values into the store (via
+ * setAssetTransformFromPlay). Scale is intentionally omitted — the
+ * body never owns scale, and the store keeps the existing scale
+ * intact when position/rotation are written.
+ *
+ * Returns an empty array when there are no bodies, so callers can
+ * unconditionally iterate.
+ *
+ * The rotation is extracted from the body's quaternion via three's
+ * Euler with the XYZ order. This is lossy when the body's quaternion
+ * didn't come from an XYZ decomposition in the first place, but
+ * the play-mode body always starts from a known XYZ Euler (the
+ * asset's pre-play rotation), and dynamic motion under gravity
+ * doesn't accumulate order errors in a way that matters for the
+ * user. If we ever need to preserve the original order, we'd need
+ * to store the body→asset relationship as a quaternion and convert
+ * back at use sites — but that's out of scope for phase 4d.
+ */
+export function readBodiesToAssets(): ReadonlyArray<{
+  assetId: string;
+  position: [number, number, number];
+  rotation: [number, number, number, EulerOrder];
+}> {
+  const out: Array<{
+    assetId: string;
+    position: [number, number, number];
+    rotation: [number, number, number, EulerOrder];
+  }> = [];
+  for (const [assetId, body] of bodyByAssetId) {
+    const q = new Quaternion(
+      body.quaternion.x,
+      body.quaternion.y,
+      body.quaternion.z,
+      body.quaternion.w,
+    );
+    const e = new Euler().setFromQuaternion(q, 'XYZ');
+    out.push({
+      assetId,
+      position: [body.position.x, body.position.y, body.position.z],
+      rotation: [e.x, e.y, e.z, 'XYZ'],
+    });
+  }
+  return out;
 }
 
 /** Step the world forward by `dt` seconds. Fixed-timestep with internal
@@ -132,10 +187,13 @@ export function stepWorld(dt: number): void {
 function shapeKey(
   spec: ColliderSpec,
   scale: readonly [number, number, number],
+  dynamic: boolean,
 ): string {
   // JSON.stringify gives a stable, allocation-free-ish key for our
   // small value objects. (Two calls per asset per frame at worst.)
-  return JSON.stringify([spec, scale]);
+  // `dynamic` is part of the key so flipping play mode rebuilds all
+  // bodies with the right mass / type.
+  return JSON.stringify([spec, scale, dynamic]);
 }
 
 function updateBodyTransform(
@@ -162,8 +220,16 @@ function updateBodyTransform(
 function buildBody(
   spec: ColliderSpec,
   transform: ObjectTransform,
+  dynamic: boolean,
 ): CANNON.Body {
-  const body = new CANNON.Body({ mass: 0, type: CANNON.Body.STATIC });
+  // Phase 4d: play mode makes the body dynamic (mass > 0) so
+  // world.step() actually moves it. Edit mode keeps the
+  // phase-4b contract (mass = 0, STATIC) — the body mirrors
+  // the asset but never moves on its own.
+  const body = new CANNON.Body({
+    mass: dynamic ? 1 : 0,
+    type: dynamic ? CANNON.Body.DYNAMIC : CANNON.Body.STATIC,
+  });
   updateBodyTransform(body, transform);
 
   const [sx, sy, sz] = transform.scale;

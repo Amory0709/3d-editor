@@ -13,6 +13,7 @@ import {
   getBodyCount,
   getBodyForAsset,
   getPhysicsWorld,
+  readBodiesToAssets,
   resetPhysicsWorld,
   stepWorld,
   syncBodies,
@@ -66,7 +67,7 @@ function reset(): void {
 // ─── Test 3: no assets → no bodies ─────────────────────────────────
 {
   reset();
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check('3. no assets → 0 bodies', getBodyCount() === 0, `count=${getBodyCount()}`);
 }
 
@@ -78,7 +79,7 @@ function reset(): void {
     useEditor.getState().activeAssetId!,
     DEFAULT_COLLIDER.box,
   );
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const id = useEditor.getState().assets[0].id;
   const body = getBodyForAsset(id);
   check(
@@ -102,7 +103,7 @@ function reset(): void {
     useEditor.getState().addPrimitive('cube');
     const id = useEditor.getState().activeAssetId!;
     useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER[t]);
-    syncBodies(useEditor.getState().assets);
+    syncBodies(useEditor.getState().assets, false);
     const body = getBodyForAsset(id);
     if (!body) {
       results.push(`${t}=NO_BODY`);
@@ -138,7 +139,7 @@ function reset(): void {
     rotation: [0, 0, 0, 'XYZ'],
     scale: [1, 1, 1],
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
   check(
     '6. body position = asset position',
@@ -158,7 +159,7 @@ function reset(): void {
     rotation: [Math.PI / 2, 0, Math.PI / 4, 'XYZ'],
     scale: [1, 1, 1],
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
   // The expected quaternion is the result of XYZ Euler (π/2, 0, π/4).
   const expected = new CANNON.Quaternion();
@@ -193,7 +194,7 @@ function reset(): void {
     rotation: [Math.PI / 4, Math.PI / 4, 0, 'YXZ'],
     scale: [1, 1, 1],
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
 
   // Build the same quaternion in three's convention. This is the
@@ -232,7 +233,7 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
   check('8. body mass = 0 (static)', body.mass === 0 && body.type === CANNON.Body.STATIC, `mass=${body.mass} type=${body.type}`);
 }
@@ -248,7 +249,7 @@ function reset(): void {
     rotation: [0, 0, 0, 'XYZ'],
     scale: [2, 1, 1],
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
   const box = body.shapes[0] as CANNON.Box;
   const he = box.halfExtents;
@@ -270,7 +271,7 @@ function reset(): void {
     rotation: [0, 0, 0, 'XYZ'],
     scale: [3, 1, 1],
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
   const sphere = body.shapes[0] as CANNON.Sphere;
   check('10. sphere scale (3,1,1) → radius = 1.8 (uses max axis)', approx(sphere.radius, 1.8), `radius=${sphere.radius}`);
@@ -282,7 +283,7 @@ function reset(): void {
   useEditor.getState().addPrimitive('cylinder');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, { type: 'capsule', radius: 0.4, height: 1.2 });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
   const cyl = body.shapes[0] as CANNON.Cylinder;
   const top = body.shapes[1] as CANNON.Sphere;
@@ -328,7 +329,7 @@ function reset(): void {
       rotation: [0, 0, 0, 'XYZ'],
       scale: [2, 1, 1],
     });
-    syncBodies(useEditor.getState().assets);
+    syncBodies(useEditor.getState().assets, false);
     const body = getBodyForAsset(id);
     if (!body) { results.push(`${c.label}=NO_BODY`); continue; }
     // The "must contain" invariant: the body's envelope on each axis
@@ -395,10 +396,10 @@ function reset(): void {
   useEditor.getState().addPrimitive('sphere');
   const id2 = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id2, DEFAULT_COLLIDER.sphere);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check('12a. 2 collider assets → 2 bodies', getBodyCount() === 2, `count=${getBodyCount()}`);
   useEditor.getState().removeAsset(id1);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check(
     '12b. removing 1 asset → 1 body',
     getBodyCount() === 1 && getBodyForAsset(id1) === null && getBodyForAsset(id2) !== null,
@@ -412,10 +413,10 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check('13a. box collider → 1 body', getBodyCount() === 1);
   useEditor.getState().setAssetCollider(id, null);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check('13b. clear collider → 0 bodies', getBodyCount() === 0, `count=${getBodyCount()}`);
 }
 
@@ -425,11 +426,11 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const before = getBodyForAsset(id)!;
   const beforeBox = before.shapes[0] as CANNON.Box;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const after = getBodyForAsset(id)!;
   const afterSphere = after.shapes[0] as CANNON.Sphere;
   check(
@@ -445,14 +446,14 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const first = getBodyForAsset(id);
   useEditor.getState().setAssetTransform(id, {
     position: [5, 0, 0],
     rotation: [0, 0, 0, 'XYZ'],
     scale: [1, 1, 1],
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const second = getBodyForAsset(id);
   check(
     '15. position-only update reuses same body instance',
@@ -467,7 +468,7 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const body = getBodyForAsset(id)!;
   const posBefore = { x: body.position.x, y: body.position.y, z: body.position.z };
   stepWorld(1 / 60);
@@ -486,7 +487,7 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check('17a. 1 body before reset', getBodyCount() === 1);
   resetPhysicsWorld();
   check('17b. resetPhysicsWorld → 0 bodies', getBodyCount() === 0);
@@ -506,7 +507,7 @@ function reset(): void {
   useEditor.getState().setAssetCollider(idA, DEFAULT_COLLIDER.box);
   // idB has no collider
   useEditor.getState().setAssetCollider(idC, DEFAULT_COLLIDER.cylinder);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check(
     '18. mixed: 2 of 3 assets with collider → 2 bodies',
     getBodyCount() === 2 &&
@@ -523,14 +524,14 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const before = getBodyForAsset(id);
   useEditor.getState().setAssetTransform(id, {
     position: [0, 0, 0],
     rotation: [0, 0, 0, 'XYZ'],
     scale: [2, 2, 2], // scale change
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const after = getBodyForAsset(id);
   const box = after!.shapes[0] as CANNON.Box;
   check(
@@ -547,16 +548,16 @@ function reset(): void {
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check('20a. sphere body present', getBodyForAsset(id)!.shapes[0] instanceof CANNON.Sphere);
   useEditor.getState().undo();
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check(
     '20b. undo → box body present',
     getBodyForAsset(id)!.shapes[0] instanceof CANNON.Box,
   );
   useEditor.getState().redo();
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   check(
     '20c. redo → sphere body present',
     getBodyForAsset(id)!.shapes[0] instanceof CANNON.Sphere,
@@ -573,7 +574,7 @@ function reset(): void {
   useEditor.getState().addPrimitive('cube');
   const id = useEditor.getState().activeAssetId!;
   useEditor.getState().setAssetCollider(id, { type: 'box', halfExtents: [0.5, 0.5, 0.5] });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const before = getBodyForAsset(id)!;
   const beforeBox = before.shapes[0] as CANNON.Box;
   check('21a. initial box has 0.5 halfExtents', approx(beforeBox.halfExtents.x, 0.5));
@@ -584,7 +585,7 @@ function reset(): void {
     type: 'box',
     halfExtents: [1.5, 0.5, 0.5],
   });
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const after = getBodyForAsset(id)!;
   const afterBox = after.shapes[0] as CANNON.Box;
   check(
@@ -600,7 +601,7 @@ function reset(): void {
     useEditor.getState().canUndo(),
   );
   useEditor.getState().undo();
-  syncBodies(useEditor.getState().assets);
+  syncBodies(useEditor.getState().assets, false);
   const undone = getBodyForAsset(id)!;
   const undoneBox = undone.shapes[0] as CANNON.Box;
   check(
@@ -636,6 +637,216 @@ function reset(): void {
     pastAfter === pastBefore + 1,
     `past grew ${pastAfter - pastBefore}`,
   );
+}
+
+// ─── Test 23: play mode flips body to dynamic ─────────────────────
+// Phase 4d: setPlayMode(true) → syncBodies(_, true) → body has
+// mass > 0 and type = DYNAMIC. After setPlayMode(false) → mass=0
+// and STATIC again.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
+  // Edit-mode sync first so the body exists static.
+  syncBodies(useEditor.getState().assets, false);
+  const staticBody = getBodyForAsset(id)!;
+  check(
+    '23a. edit mode: body is static (mass=0, type=STATIC)',
+    staticBody.mass === 0 && staticBody.type === CANNON.Body.STATIC,
+    `mass=${staticBody.mass} type=${staticBody.type}`,
+  );
+  // Now enter play mode and re-sync.
+  useEditor.getState().setPlayMode(true);
+  syncBodies(useEditor.getState().assets, true);
+  const dynamicBody = getBodyForAsset(id)!;
+  check(
+    '23b. play mode: body is dynamic (mass>0, type=DYNAMIC)',
+    dynamicBody.mass > 0 && dynamicBody.type === CANNON.Body.DYNAMIC,
+    `mass=${dynamicBody.mass} type=${dynamicBody.type}`,
+  );
+  // Same body instance (rebuilt only on shape change, not on dynamic flip).
+  // Note: dynamic flag IS part of the shapeKey, so flipping DOES rebuild.
+  // This is intentional — changing mass on a live body in cannon-es is
+  // unreliable, so we remove+add. The test confirms a fresh body exists.
+  check('23c. dynamic body is a new instance (mass change = rebuild)', staticBody !== dynamicBody);
+  // Exit play and re-sync.
+  useEditor.getState().setPlayMode(false);
+  syncBodies(useEditor.getState().assets, false);
+  const staticAgain = getBodyForAsset(id)!;
+  check(
+    '23d. exit play: body is static again (mass=0, type=STATIC)',
+    staticAgain.mass === 0 && staticAgain.type === CANNON.Body.STATIC,
+    `mass=${staticAgain.mass} type=${staticAgain.type}`,
+  );
+}
+
+// ─── Test 24: dynamic body actually moves under gravity ──────────
+// Phase 4d: in play mode, world.step() drives the body. After a
+// step, a body starting at y=5 should have y < 5.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
+  // Position the asset at y=5 so the body has somewhere to fall from.
+  useEditor.getState().setAssetTransform(id, {
+    position: [0, 5, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  useEditor.getState().setPlayMode(true);
+  syncBodies(useEditor.getState().assets, true);
+  const before = getBodyForAsset(id)!;
+  const yBefore = before.position.y;
+  stepWorld(1 / 60);
+  // Re-fetch after the step (body is in world, but its ref may have
+  // been replaced if dynamic flag changed — not the case here, so
+  // same ref).
+  const after = getBodyForAsset(id)!;
+  check(
+    '24. dynamic body falls under gravity (y decreased after one step)',
+    after.position.y < yBefore,
+    `y before=${yBefore} after=${after.position.y.toFixed(4)}`,
+  );
+  // Cleanup
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 25: readBodiesToAssets returns the body's current state ──
+// Phase 4d: in play mode, the ticker reads each body back into the
+// store. Verify that readBodiesToAssets returns the post-step position
+// and a valid rotation.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
+  useEditor.getState().setAssetTransform(id, {
+    position: [1, 2, 3],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  useEditor.getState().setPlayMode(true);
+  syncBodies(useEditor.getState().assets, true);
+  const updates = readBodiesToAssets();
+  check('25a. readBodiesToAssets returns one entry per body', updates.length === 1, `count=${updates.length}`);
+  const u = updates[0];
+  check('25b. assetId matches', u.assetId === id);
+  check(
+    '25c. position matches body position',
+    approx(u.position[0], 1, 1e-3) && approx(u.position[1], 2, 1e-3) && approx(u.position[2], 3, 1e-3),
+    `pos=(${u.position[0]}, ${u.position[1]}, ${u.position[2]})`,
+  );
+  check('25d. rotation is XYZ', u.rotation[3] === 'XYZ');
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 26: enter-play snapshots, exit-play writes back ────────
+// Phase 4d contract:
+//   - setPlayMode(true) → pushes a snapshot of the current assets
+//     onto history.past (so a future stop+undo reverts the play)
+//   - setPlayMode(false) does NOT push (the snapshot from enter-play
+//     is the one that ⌘Z consumes)
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
+  useEditor.getState().setAssetTransform(id, {
+    position: [10, 20, 30],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  syncBodies(useEditor.getState().assets, false);
+  const pastBeforePlay = useEditor.getState().history.past.length;
+  // Enter play
+  useEditor.getState().setPlayMode(true);
+  const pastAfterPlay = useEditor.getState().history.past.length;
+  check(
+    '26a. setPlayMode(true) pushes a snapshot (past grew by 1)',
+    pastAfterPlay === pastBeforePlay + 1,
+    `past ${pastBeforePlay}→${pastAfterPlay}`,
+  );
+  // Body takes over, asset.transform doesn't change just from entering play.
+  check(
+    '26b. entering play does not mutate the current asset transform',
+    useEditor.getState().assets[0].transform.position[0] === 10 &&
+      useEditor.getState().assets[0].transform.position[1] === 20 &&
+      useEditor.getState().assets[0].transform.position[2] === 30,
+  );
+  // After several steps in play mode, the body has moved.
+  syncBodies(useEditor.getState().assets, true);
+  for (let i = 0; i < 10; i++) stepWorld(1 / 60);
+  // The ticker would now write the body's position back; simulate it.
+  for (const u of readBodiesToAssets()) {
+    useEditor.getState().setAssetTransformFromPlay(u.assetId, u.position, u.rotation);
+  }
+  check(
+    '26c. after play + body→store write, asset position is no longer (10,20,30)',
+    useEditor.getState().assets[0].transform.position[1] !== 20,
+    `y=${useEditor.getState().assets[0].transform.position[1]}`,
+  );
+  // Exit play: does NOT push another history entry.
+  const pastBeforeStop = useEditor.getState().history.past.length;
+  useEditor.getState().setPlayMode(false);
+  const pastAfterStop = useEditor.getState().history.past.length;
+  check(
+    '26d. setPlayMode(false) does NOT push history (snapshot from enter-play is the ⌘Z target)',
+    pastAfterStop === pastBeforeStop,
+    `past ${pastBeforeStop}→${pastAfterStop}`,
+  );
+  // Undo should restore the pre-play position (10, 20, 30).
+  useEditor.getState().undo();
+  check(
+    '26e. ⌘Z after stop reverts to pre-play position (10, 20, 30)',
+    useEditor.getState().assets[0].transform.position[0] === 10 &&
+      useEditor.getState().assets[0].transform.position[1] === 20 &&
+      useEditor.getState().assets[0].transform.position[2] === 30,
+  );
+}
+
+// ─── Test 27: setAssetTransformFromPlay is no-op outside play mode ──
+// Phase 4d safety: the action checks the flag and returns s unchanged.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetTransform(id, {
+    position: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  useEditor.getState().setAssetTransformFromPlay(id, [99, 99, 99], [0, 0, 0, 'XYZ']);
+  check(
+    '27. setAssetTransformFromPlay is a no-op when playMode is false',
+    useEditor.getState().assets[0].transform.position[0] === 0,
+  );
+}
+
+// ─── Test 28: setAssetTransform is a no-op in play mode ───────────
+// Phase 4d safety: gizmo / keyboard / undo must not race the body.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetTransform(id, {
+    position: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  useEditor.getState().setPlayMode(true);
+  useEditor.getState().setAssetTransform(id, {
+    position: [42, 42, 42],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  check(
+    '28. setAssetTransform is a no-op in play mode (body is source of truth)',
+    useEditor.getState().assets[0].transform.position[0] === 0,
+    `pos.x=${useEditor.getState().assets[0].transform.position[0]}`,
+  );
+  useEditor.getState().setPlayMode(false);
 }
 
 // ─── Summary ──────────────────────────────────────────────────────

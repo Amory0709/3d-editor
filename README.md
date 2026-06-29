@@ -14,7 +14,7 @@ Browser-based editor for mesh and gaussian-splat 3D assets.
 | 4a | done | Visual collider markers (box/sphere/capsule/cylinder) + camera refit-on-add + sidebar empty state |
 | 4b | done | cannon-es physics world mirrors the collider graph (one-way editor → physics sync, static bodies, capsule = compound, scale baked into shape) — see [Known limitations](#phase-4b--known-limitations) |
 | 4c | done | Numeric collider editor: halfExtents / radius / height inputs with blur-clamp + blur-commit (one history entry per focus session) |
-| 4d | planned | Play mode: dynamic bodies, gravity-driven motion, body→asset transform sync on stop |
+| 4d | done | Play mode: Toolbar Play/Stop button (P shortcut), bodies flip dynamic, world.step() drives them, body→asset transform sync on stop (one history entry per play session) |
 | 4e | planned | Collision events: surface `beginContact` (read-only log, no full response UI) |
 | 5 | planned | Gaussian splat editor (`.splat`/`.ply`/`.spz`) |
 
@@ -43,18 +43,27 @@ re-discover them.
    box gets a 1 m collider, which the user resizes with the numeric
    editor. Auto-fit to the mesh's bounding box is a follow-up.
 
-### Physics (4b)
+### Physics (4b / 4d)
 
-2. **Static bodies only.** Phase 4d (play mode) flips them dynamic.
-3. **Scale envelope, not exact match.** For capsule + sphere, the
+2. **Scale envelope, not exact match.** For capsule + sphere, the
    body is a conservative envelope (uses `max(sx, sz)` / `max(sx, sy, sz)`),
    so it can extend beyond the visual in the unscaled axes. Acceptable
    for collision queries; a future phase can swap in ellipsoids if
    exactness matters.
-4. **Module-level singleton world.** Convenient for a single editor,
+3. **Rotation is extracted to XYZ Euler on body→asset write.** The
+   dynamic body's quaternion is converted to an XYZ Euler on every
+   frame in play mode. This is lossy if the body started from a
+   non-XYZ Euler (e.g. a phase-4b gizmo that authored YXZ). For
+   play-mode simulation it doesn't matter (the body just falls and
+   rotates), but a future phase that round-trips through play
+   while preserving order will need to store the quaternion.
+4. **No collider edits during play.** Changing type or dimensions
+   mid-simulation would require rebuilding a dynamic body mid-step,
+   which cannon-es doesn't support. Stop first, edit, re-play.
+5. **Module-level singleton world.** Convenient for a single editor,
    but it means HMR and multi-Canvas setups need care. `resetPhysicsWorld()`
    exists for tests. Moving the world into a React Context is on the
-   4d/4e backlog — not worth a refactor right now.
+   4e/5 backlog — not worth a refactor right now.
 
 ### View (4a / 4c)
 
@@ -102,6 +111,7 @@ Any new mutation clears the redo stack (standard editor behavior).
 | Esc | Deselect active asset |
 | ⌘Z / Ctrl+Z | Undo |
 | ⌘⇧Z / Ctrl+Y / Ctrl+⇧Z | Redo |
+| P | Toggle play / stop (phase 4d) |
 
 ## Project layout
 

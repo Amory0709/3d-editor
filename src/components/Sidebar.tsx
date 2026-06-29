@@ -63,6 +63,7 @@ export function Sidebar() {
   const canUndo = useEditor((s) => s.canUndo());
   const canRedo = useEditor((s) => s.canRedo());
   const blurb = MODE_BLURB[mode];
+  const playMode = useEditor((s) => s.playMode);
 
   const activeAsset = activeAssetId
     ? assets.find((a) => a.id === activeAssetId) ?? null
@@ -106,6 +107,8 @@ export function Sidebar() {
             className="primitive-btn"
             onClick={() => addPrimitive(p)}
             title={`Add ${primitiveLabel(p)}`}
+            // Phase 4d: primitives are read-only during play.
+            disabled={playMode}
           >
             {primitiveLabel(p)}
           </button>
@@ -115,6 +118,8 @@ export function Sidebar() {
       {/*
         Phase 4a: Transform section is always visible (with a clear
         empty state) so ESC doesn't make the controls vanish mid-flow.
+        Phase 4d: in play mode the controls are disabled (the body's
+        transform is the source of truth).
       */}
       {(
         <>
@@ -127,6 +132,7 @@ export function Sidebar() {
                       key={m}
                       className={`transform-btn${transformMode === m ? ' active' : ''}`}
                       onClick={() => setTransformMode(m)}
+                      disabled={playMode}
                     >
                       {TRANSFORM_LABEL[m]}
                     </button>
@@ -140,6 +146,7 @@ export function Sidebar() {
                       className={`axis-btn${axisLock === a ? ' active' : ''}`}
                       onClick={() => setAxisLock(axisLock === a ? null : a)}
                       title={`Toggle ${a.toUpperCase()} axis lock`}
+                      disabled={playMode}
                     >
                       {AXIS_LABEL[a]}
                     </button>
@@ -172,6 +179,7 @@ export function Sidebar() {
                   className="reset-btn"
                   onClick={() => resetAssetTransform(activeAsset.id)}
                   title="Reset transform to identity"
+                  disabled={playMode}
                 >
                   ⟲ Reset transform
                 </button>
@@ -192,6 +200,10 @@ export function Sidebar() {
               <button
                 className={`collider-btn${activeAsset.collider === null ? ' active' : ''}`}
                 onClick={() => setAssetCollider(activeAsset.id, null)}
+                // Phase 4d: changing collider type during play would
+                // require rebuilding a dynamic body mid-simulation
+                // (not supported by cannon-es). Disable the picker.
+                disabled={playMode}
               >
                 None
               </button>
@@ -200,6 +212,7 @@ export function Sidebar() {
                   key={c}
                   className={`collider-btn${activeAsset.collider?.type === c ? ' active' : ''}`}
                   onClick={() => setAssetCollider(activeAsset.id, DEFAULT_COLLIDER[c])}
+                  disabled={playMode}
                 >
                   {colliderLabel(c)}
                 </button>
@@ -214,11 +227,15 @@ export function Sidebar() {
             Phase 4c-A: numeric collider editor. Replaces the read-only
             summary with inputs (blur-clamp + blur-commit). Reset to
             defaults is preserved.
+            Phase 4d: in play mode, the editor is read-only — same
+            reason as the type buttons above (can't mutate a body
+            mid-simulation).
           */}
           {activeAsset?.collider && (
             <ColliderEditor
               assetId={activeAsset.id}
               spec={activeAsset.collider}
+              readOnly={playMode}
             />
           )}
         </>
@@ -246,6 +263,9 @@ export function Sidebar() {
                 className="asset-remove"
                 onClick={() => removeAsset(a.id)}
                 title="Remove"
+                // Phase 4d: removing during play would yank an asset
+                // out from under its body mid-simulation. Stop first.
+                disabled={playMode}
               >
                 ×
               </button>

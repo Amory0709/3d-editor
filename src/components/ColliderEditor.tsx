@@ -26,9 +26,15 @@ import {
 interface Props {
   assetId: string;
   spec: ColliderSpec;
+  /**
+   * Phase 4d: when true, the inputs and reset button are disabled
+   * and the editor becomes a read-only summary. Used during play
+   * mode (where mutating a body mid-simulation isn't supported).
+   */
+  readOnly?: boolean;
 }
 
-export function ColliderEditor({ assetId, spec }: Props) {
+export function ColliderEditor({ assetId, spec, readOnly = false }: Props) {
   return (
     <div className="collider-editor">
       <div className="collider-editor-fields">
@@ -40,6 +46,7 @@ export function ColliderEditor({ assetId, spec }: Props) {
             field={f.field}
             label={f.label}
             initial={f.value}
+            readOnly={readOnly}
           />
         ))}
       </div>
@@ -49,6 +56,7 @@ export function ColliderEditor({ assetId, spec }: Props) {
           useEditor.getState().setAssetCollider(assetId, DEFAULT_COLLIDER[spec.type])
         }
         title="Reset collider dimensions to defaults"
+        disabled={readOnly}
       >
         ⟲ Reset to defaults
       </button>
@@ -62,6 +70,7 @@ interface FieldProps {
   field: ColliderField;
   label: string;
   initial: number;
+  readOnly?: boolean;
 }
 
 /**
@@ -79,7 +88,7 @@ interface FieldProps {
  * is created and the local string state snaps back to the last good
  * value (so the display doesn't lie).
  */
-function NumberField({ assetId, spec, field, label, initial }: FieldProps) {
+function NumberField({ assetId, spec, field, label, initial, readOnly = false }: FieldProps) {
   // Local string state for the input. Stored as a string so the
   // browser can show typing-in-progress values (e.g. "-" mid-edit)
   // without flicker. Sanitized back to a number on blur.
@@ -147,6 +156,7 @@ function NumberField({ assetId, spec, field, label, initial }: FieldProps) {
         onChange={onChange}
         onBlur={onBlur}
         aria-label={`${label} dimension`}
+        disabled={readOnly}
       />
     </label>
   );

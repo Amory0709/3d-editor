@@ -79,6 +79,31 @@ button.primary:hover { filter: brightness(1.08); }
   color: var(--text);
 }
 .toolbar .spacer { flex: 1; }
+/* Phase 4d: Play / Stop toggle. The accent color is the editor's
+   play-mode signature — once you see green, you're in a simulation
+   and most other UI is disabled. */
+.toolbar .play-toggle {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border: 1px solid var(--border, #2a3142);
+  border-radius: 4px;
+  background: var(--panel-1, #0f1218);
+  color: var(--text);
+  cursor: pointer;
+  margin-left: 8px;
+}
+.toolbar .play-toggle:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+.toolbar .play-toggle.playing {
+  background: var(--accent, #5ce0c5);
+  color: #0a0d14;
+  border-color: var(--accent, #5ce0c5);
+}
+.toolbar .play-toggle.playing:hover {
+  filter: brightness(0.95);
+}
 
 .main {
   display: grid;

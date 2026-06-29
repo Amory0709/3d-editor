@@ -108,6 +108,36 @@ interface EditorState {
   resetAssetTransform: (id: string) => void;
   setAssetCollider: (id: string, collider: ColliderSpec | null) => void;
 
+  /**
+   * Play mode (phase 4d). When true:
+   *   - bodies are dynamic (mass > 0) and the world step actually
+   *     moves them
+   *   - the asset's transform is the body's transform (physics is
+   *     the source of truth during play)
+   *   - gizmo, primitive add, upload, collider editor, and undo of
+   *     mid-play motion are all disabled
+   *
+   * `setPlayMode` is the only way to flip this flag. Entering play
+   * snapshots the current assets (so a stop+undo reverts the whole
+   * play session in one history entry); exiting play writes each
+   * body's transform back to its asset and flips bodies back to
+   * static.
+   */
+  playMode: boolean;
+  setPlayMode: (play: boolean) => void;
+  /**
+   * Write a body's position + rotation into the asset graph during
+   * play mode. Scale is preserved from the existing asset (the body
+   * never owns scale). Called by PhysicsTicker every frame for every
+   * dynamic body. Does NOT push history (play is a sandbox; the
+   * snapshot is taken once on enter-play). Does NOT clear redo.
+   */
+  setAssetTransformFromPlay: (
+    id: string,
+    position: [number, number, number],
+    rotation: [number, number, number, EulerOrder],
+  ) => void;
+
   /** primitive authoring (phase 3) */
   addPrimitive: (type: PrimitiveType) => void;
 
@@ -214,17 +244,32 @@ export const useEditor = create<EditorState>((set, get) => ({
   setActiveAsset: (id) => set({ activeAssetId: id }),
 
   setAssetTransform: (id, transform) =>
-    set((s) => ({
-      history: snapshotHistory(s.history, s.assets),
-      assets: s.assets.map((a) => (a.id === id ? { ...a, transform } : a)),
-    })),
+    set((s) => {
+      // Phase 4d: in play mode, physics is the source of truth. A
+      // gizmo / keyboard / undo path that fires setAssetTransform
+      // here would race the body's per-frame write-back. Reject the
+      // call so the body wins. (Gizmo is also disabled in play, so
+      // this is a safety net, not the primary defense.)
+      if (s.playMode) return s;
+      return {
+        history: snapshotHistory(s.history, s.assets),
+        assets: s.assets.map((a) => (a.id === id ? { ...a, transform } : a)),
+      };
+    }),
 
   setAssetTransformLive: (id, transform) =>
-    set((s) => ({
-      // Live update during a gizmo drag — no history, no future clear.
-      // The drag is committed once on mouse-up via commitTransformDrag.
-      assets: s.assets.map((a) => (a.id === id ? { ...a, transform } : a)),
-    })),
+    set((s) => {
+      // Defense in depth: see setAssetTransform. In play mode the
+      // body is the source of truth; the gizmo is disabled so this
+      // path is unreachable, but we no-op here in case anything
+      // else (keyboard, undo of a non-play change) ever calls it.
+      if (s.playMode) return s;
+      return {
+        // Live update during a gizmo drag — no history, no future clear.
+        // The drag is committed once on mouse-up via commitTransformDrag.
+        assets: s.assets.map((a) => (a.id === id ? { ...a, transform } : a)),
+      };
+    }),
 
   commitTransformDrag: (preDragAssets) => {
     const current = get().assets;
@@ -265,6 +310,48 @@ export const useEditor = create<EditorState>((set, get) => ({
       history: snapshotHistory(s.history, s.assets),
       assets: s.assets.map((a) => (a.id === id ? { ...a, collider } : a)),
     })),
+
+  playMode: false,
+  setPlayMode: (play) => {
+    const s = get();
+    if (s.playMode === play) return;
+    if (play) {
+      // Entering play: snapshot current assets so a future stop+undo
+      // reverts the whole play session in one entry. We don't push
+      // history here — the snapshot is consumed by `setPlayMode(false)`
+      // when the user actually stops.
+      set({
+        // The pre-play snapshot lives in history; clearing future is
+        // appropriate (any pending redo is invalidated by entering play).
+        history: { past: [...s.history.past, s.assets], future: [] },
+        playMode: true,
+        // De-select so the gizmo doesn't show a stale "active" target
+        // once bodies take over. The play-mode UI will indicate state.
+        activeAssetId: null,
+      });
+    } else {
+      // Exiting play: the actual transform write-back happens in
+      // PhysicsTicker's stop path (which is where the bodies are
+      // and where we want to be authoritative). Here we just flip
+      // the flag. The body → asset write is done by the ticker
+      // immediately before this flag flips, so a read of asset.transform
+      // after this setPlayMode(false) returns the final play state.
+      set({ playMode: false });
+    }
+  },
+  setAssetTransformFromPlay: (id, position, rotation) =>
+    set((s) => {
+      if (!s.playMode) return s; // safety: only meaningful during play
+      return {
+        assets: s.assets.map((a) => {
+          if (a.id !== id) return a;
+          return {
+            ...a,
+            transform: { ...a.transform, position, rotation },
+          };
+        }),
+      };
+    }),
 
   addPrimitive: (type) => {
     const id = crypto.randomUUID();
