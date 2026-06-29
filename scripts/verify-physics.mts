@@ -248,6 +248,89 @@ function reset(): void {
   );
 }
 
+// ─── Test 11b: non-uniform X scale (2,1,1) on all 4 collider types ──
+// Regression: a non-uniform X scale used to produce a truncated-cone body
+// for the cylinder (radiusTop * sx, radiusBottom * sz) which did NOT
+// contain the visual's elliptical cross-section. The fix uses max(sx, sz)
+// for both top and bottom, so the body is a uniform Y-cylinder that
+// envelopes the visual in all directions. The other 3 collider types
+// are tested in the same pass to lock in the contract for future refactors.
+{
+  reset();
+  const cases: Array<{ t: ColliderSpec['type']; spec: ColliderSpec; label: string }> = [
+    { t: 'box', spec: { type: 'box', halfExtents: [0.5, 0.5, 0.5] }, label: 'box' },
+    { t: 'sphere', spec: { type: 'sphere', radius: 0.6 }, label: 'sphere' },
+    { t: 'cylinder', spec: { type: 'cylinder', radius: 0.5, height: 1.2 }, label: 'cylinder' },
+    { t: 'capsule', spec: { type: 'capsule', radius: 0.4, height: 1.2 }, label: 'capsule' },
+  ];
+  const results: string[] = [];
+  for (const c of cases) {
+    useEditor.getState().addPrimitive('cube');
+    const id = useEditor.getState().activeAssetId!;
+    useEditor.getState().setAssetCollider(id, c.spec);
+    useEditor.getState().setAssetTransform(id, {
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [2, 1, 1],
+    });
+    syncBodies(useEditor.getState().assets);
+    const body = getBodyForAsset(id);
+    if (!body) { results.push(`${c.label}=NO_BODY`); continue; }
+    // The "must contain" invariant: the body's envelope on each axis
+    // must be >= the visual's envelope on that axis. For X, the visual
+    // is at spec_radius * 2 (since scale.x = 2). For Z, visual is at
+    // spec_radius * 1.
+    // Box: halfExtents.x >= 0.5*2 = 1.0; halfExtents.z >= 0.5*1 = 0.5
+    // Sphere: radius >= 0.6*2 = 1.2
+    // Cylinder: top.x >= 1.0, bot.x >= 1.0 (regression: was 0.5),
+    //           top.z >= 0.5, bot.z >= 0.5
+    // Capsule: cylinder+radius >= 0.4*2 = 0.8; sphere radius >= 0.8
+    const fails: string[] = [];
+    switch (c.t) {
+      case 'box': {
+        const box = body.shapes[0] as CANNON.Box;
+        if (box.halfExtents.x < 1.0 - 1e-6) fails.push(`x=${box.halfExtents.x}<1.0`);
+        if (box.halfExtents.z < 0.5 - 1e-6) fails.push(`z=${box.halfExtents.z}<0.5`);
+        break;
+      }
+      case 'sphere': {
+        const sphere = body.shapes[0] as CANNON.Sphere;
+        if (sphere.radius < 1.2 - 1e-6) fails.push(`r=${sphere.radius}<1.2`);
+        break;
+      }
+      case 'cylinder': {
+        const cyl = body.shapes[0] as CANNON.Cylinder;
+        // The core regression check: both top AND bottom radius must be
+        // >= 1.0 (visual's X extent at scale 2). Pre-fix, the bottom
+        // was 0.5 and the body did not contain the visual at y=-0.6.
+        if (cyl.radiusTop < 1.0 - 1e-6) fails.push(`top=${cyl.radiusTop}<1.0`);
+        if (cyl.radiusBottom < 1.0 - 1e-6) fails.push(`bot=${cyl.radiusBottom}<1.0`);
+        if (cyl.radiusTop < 0.5 - 1e-6) fails.push(`top<0.5 (z extent)`);
+        if (cyl.radiusBottom < 0.5 - 1e-6) fails.push(`bot<0.5 (z extent)`);
+        // The fix also makes top == bottom (no longer a truncated cone).
+        if (Math.abs(cyl.radiusTop - cyl.radiusBottom) > 1e-6) {
+          fails.push(`truncated cone (top=${cyl.radiusTop} != bot=${cyl.radiusBottom})`);
+        }
+        break;
+      }
+      case 'capsule': {
+        const cyl = body.shapes[0] as CANNON.Cylinder;
+        const top = body.shapes[1] as CANNON.Sphere;
+        // Cylinder cross-section: radius must be >= 0.4*2 = 0.8 (X).
+        if (cyl.radiusTop < 0.8 - 1e-6) fails.push(`cylTop=${cyl.radiusTop}<0.8`);
+        // End-sphere radius must also be >= 0.8 so the X-extending cap
+        // contains the visual's cap.
+        if (top.radius < 0.8 - 1e-6) fails.push(`sphereR=${top.radius}<0.8`);
+        break;
+      }
+    }
+    results.push(fails.length === 0 ? `${c.label}=ok` : `${c.label}=FAIL(${fails.join(',')})`);
+    useEditor.getState().removeAsset(id);
+  }
+  const allOk = results.every((r) => r.endsWith('ok'));
+  check('11b. non-uniform X scale (2,1,1) body contains visual for all 4 types', allOk, results.join(', '));
+}
+
 // ─── Test 12: removing an asset removes its body ───────────────────
 {
   reset();

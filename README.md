@@ -12,7 +12,7 @@ Browser-based editor for mesh and gaussian-splat 3D assets.
 | 3.1 | done | Editor usability: undo/redo (⌘Z / ⌘⇧Z / Ctrl+Y), numeric transform inspector, axis lock (X/Y/Z), reset-to-identity, larger gizmo |
 | 3.2 | done | Drag commit-on-release (1 history entry per gizmo drag, was ~60/frame) |
 | 4a | done | Visual collider markers (box/sphere/capsule/cylinder) + camera refit-on-add + sidebar empty state |
-| 4b | done | cannon-es physics world mirrors the collider graph (one-way editor → physics sync, static bodies, capsule = compound, scale baked into shape) |
+| 4b | done | cannon-es physics world mirrors the collider graph (one-way editor → physics sync, static bodies, capsule = compound, scale baked into shape) — see [Known limitations](#phase-4b--known-limitations) |
 | 4c | planned | Numeric collider editor (custom halfExtents / radius / height), play mode, collision events |
 | 5 | planned | Gaussian splat editor (`.splat`/`.ply`/`.spz`) |
 
@@ -26,6 +26,38 @@ npm run typecheck    # tsc -b --noEmit
 npm run verify       # store + physics invariants (pure-Node, no browser needed)
 npm run smoke -- path/to/file.glb   # GLB loader sanity check
 ```
+
+## Phase 4b — known limitations
+
+The world mirrors the editor's collider graph, but a few edges are
+intentionally rough. They are tracked here so future phases (4c, 5)
+don't re-discover them.
+
+1. **No numeric collider editor.** Sidebar shows a read-only spec
+   summary + reset-to-defaults. There is no UI to edit `halfExtents`,
+   `radius`, or `height` per asset yet — that's the main 4c deliverable.
+2. **No auto-fit to mesh.** Default colliders use fixed sizes
+   (`box: ±0.5`, `sphere: r=0.6`, `capsule: r=0.4 h=1.2`,
+   `cylinder: r=0.5 h=1.2`). A loaded `.glb` mesh with a 3 m bounding
+   box gets a 1 m collider. The user must adjust in 4c.
+3. **Euler order is hard-coded to 'XYZ'.** Matches three's default and
+   the gizmo's, so it's safe today. If anyone changes
+   `g.rotation.order` later, the body's quaternion will diverge. The
+   order-agnostic fix (store a quaternion in the transform) is on the
+   4c/5 backlog.
+4. **Non-active assets have invisible collider markers.** Only the
+   selected asset renders the marker in the viewport, but every asset
+   with a collider is reflected in the physics world. There is no
+   "show all colliders" toggle yet.
+5. **Scale envelope, not exact match.** For capsule + sphere, the
+   body is a conservative envelope (uses `max(sx, sz)` / `max(sx, sy, sz)`),
+   so it can extend beyond the visual in the unscaled axes. Acceptable
+   for collision queries; a future phase can swap in ellipsoids if
+   exactness matters.
+6. **Module-level singleton world.** Convenient for a single editor,
+   but it means HMR and multi-Canvas setups need care. `resetPhysicsWorld()`
+   exists for tests. Moving the world into a React Context is on the
+   4c/5 backlog — not worth a refactor right now.
 
 ## Supported inputs (phase 3.1)
 

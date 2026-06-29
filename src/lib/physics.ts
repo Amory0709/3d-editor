@@ -188,20 +188,28 @@ function buildBody(
       break;
     }
     case 'cylinder': {
-      // Cylinder is along its local Y. radius scales by X/Z; height
-      // scales by Y.
-      const shape = new CANNON.Cylinder(
-        spec.radius * sx,
-        spec.radius * sz,
-        spec.height * sy,
-        16,
-      );
+      // Cylinder is along its local Y. The visual CylinderGeometry
+      // under non-uniform X/Z scale becomes an elliptical cross-section
+      // (X = r*sx, Z = r*sz), NOT a truncated cone. cannon-es Cylinder
+      // is circular, so we use max(sx, sz) for both top and bottom —
+      // the body becomes a uniform Y-cylinder that contains the
+      // visual's elliptical cross-section in both X and Z. See
+      // verify-physics.mts "non-uniform scale" cases.
+      const r = spec.radius * Math.max(sx, sz);
+      const shape = new CANNON.Cylinder(r, r, spec.height * sy, 16);
       body.addShape(shape);
       break;
     }
     case 'capsule': {
       // Compound: cylinder (middle) + 2 spheres (ends), aligned along Y.
       // Not a primitive in cannon-es; this is the textbook construction.
+      // The radius uses max(sx, sz) so the body's circular cross-section
+      // contains the visual's elliptical cross-section in X and Z. The
+      // end-sphere radius inherits the same value, so the body's Y extent
+      // (sphere radius extends in Y too) is an envelope — it can stick
+      // out past the visual's Y extent when sy < max(sx, sz). That's
+      // acceptable for phase 4b (capsule as envelope); a future phase
+      // could swap spheres for ellipsoids if exactness matters.
       const r = spec.radius * Math.max(sx, sz);
       const h = spec.height * sy;
       body.addShape(new CANNON.Cylinder(r, r, h, 16));
