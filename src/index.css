@@ -254,6 +254,58 @@ button.primary:hover { filter: brightness(1.08); }
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
+.sidebar .collider-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border-radius: 4px;
+}
+.sidebar .collider-editor-fields {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.sidebar .collider-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.sidebar .collider-field-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-dim, #6b7484);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sidebar .collider-field-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 3px 6px;
+  background: var(--panel-1, #0f1218);
+  color: var(--text);
+  border: 1px solid var(--border, #2a3142);
+  border-radius: 3px;
+  width: 100%;
+  /* Hide the native spinner on number inputs — it competes with the
+     Reset button for click target, and we have keyboard / paste for
+     fine control. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.sidebar .collider-field-input::-webkit-outer-spin-button,
+.sidebar .collider-field-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sidebar .collider-field-input:focus {
+  outline: none;
+  border-color: var(--accent-2, #5ce0c5);
+}
 .sidebar .collider-vals {
   display: flex;
   flex-direction: column;

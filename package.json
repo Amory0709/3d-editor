@@ -13,7 +13,8 @@
     "smoke": "tsx scripts/smoke-load-gltf.ts",
     "verify:store": "tsx --tsconfig ./tsconfig.app.json scripts/verify-store.mts",
     "verify:physics": "tsx --tsconfig ./tsconfig.app.json scripts/verify-physics.mts",
-    "verify": "npm run verify:store && npm run verify:physics"
+    "verify:collider-input": "tsx --tsconfig ./tsconfig.app.json scripts/verify-collider-input.mts",
+    "verify": "npm run verify:store && npm run verify:physics && npm run verify:collider-input"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

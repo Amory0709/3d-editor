@@ -563,6 +563,81 @@ function reset(): void {
   );
 }
 
+// ─── Test 21: numeric editor's setAssetCollider path rebuilds the body ──
+// Phase 4c-A: the sidebar's number inputs call setAssetCollider with a
+// new spec. This test simulates that path — same operation the
+// ColliderEditor's onBlur would do — and confirms the body is rebuilt
+// with the new dimensions (not just the position updated in place).
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, { type: 'box', halfExtents: [0.5, 0.5, 0.5] });
+  syncBodies(useEditor.getState().assets);
+  const before = getBodyForAsset(id)!;
+  const beforeBox = before.shapes[0] as CANNON.Box;
+  check('21a. initial box has 0.5 halfExtents', approx(beforeBox.halfExtents.x, 0.5));
+
+  // Simulate the user editing the box X field from 0.5 to 1.5 and
+  // blurring. The editor builds a new spec and calls setAssetCollider.
+  useEditor.getState().setAssetCollider(id, {
+    type: 'box',
+    halfExtents: [1.5, 0.5, 0.5],
+  });
+  syncBodies(useEditor.getState().assets);
+  const after = getBodyForAsset(id)!;
+  const afterBox = after.shapes[0] as CANNON.Box;
+  check(
+    '21b. body rebuilt with new halfExtents.x = 1.5',
+    before !== after &&
+      approx(afterBox.halfExtents.x, 1.5) &&
+      approx(afterBox.halfExtents.y, 0.5) &&
+      approx(afterBox.halfExtents.z, 0.5),
+    `same instance=${before === after} he=(${afterBox.halfExtents.x}, ${afterBox.halfExtents.y}, ${afterBox.halfExtents.z})`,
+  );
+  check(
+    '21c. one history entry per edit (so ⌘Z reverts the value change)',
+    useEditor.getState().canUndo(),
+  );
+  useEditor.getState().undo();
+  syncBodies(useEditor.getState().assets);
+  const undone = getBodyForAsset(id)!;
+  const undoneBox = undone.shapes[0] as CANNON.Box;
+  check(
+    '21d. undo reverts body to original halfExtents = 0.5',
+    approx(undoneBox.halfExtents.x, 0.5),
+    `he.x=${undoneBox.halfExtents.x}`,
+  );
+}
+
+// ─── Test 22: numeric editor's edit doesn't push history when value unchanged ──
+// Regression: the ColliderEditor's onBlur must not create history
+// entries when the user focused and blurred without changing the
+// value (e.g. accidentally tabbing through). We simulate by calling
+// setAssetCollider with the *same* spec, which the helper layer
+// can't detect (the store always pushes on a set call) — but the
+// React layer's onBlur short-circuits before reaching the store. The
+// pure side of that contract is tested in verify-collider-input.mts;
+// here we just confirm the store's contract: a set with the exact
+// same value still pushes one entry (the store can't know it's a
+// no-op without deep comparison). This is by design — the React
+// layer is the gatekeeper.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, { type: 'sphere', radius: 0.6 });
+  const pastBefore = useEditor.getState().history.past.length;
+  // Set the same value again.
+  useEditor.getState().setAssetCollider(id, { type: 'sphere', radius: 0.6 });
+  const pastAfter = useEditor.getState().history.past.length;
+  check(
+    '22. store pushes history even on no-op set (React layer is the gatekeeper)',
+    pastAfter === pastBefore + 1,
+    `past grew ${pastAfter - pastBefore}`,
+  );
+}
+
 // ─── Summary ──────────────────────────────────────────────────────
 const passed = RESULTS.filter((r) => r.pass).length;
 const failed = RESULTS.length - passed;

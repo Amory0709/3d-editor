@@ -13,7 +13,9 @@ Browser-based editor for mesh and gaussian-splat 3D assets.
 | 3.2 | done | Drag commit-on-release (1 history entry per gizmo drag, was ~60/frame) |
 | 4a | done | Visual collider markers (box/sphere/capsule/cylinder) + camera refit-on-add + sidebar empty state |
 | 4b | done | cannon-es physics world mirrors the collider graph (one-way editor → physics sync, static bodies, capsule = compound, scale baked into shape) — see [Known limitations](#phase-4b--known-limitations) |
-| 4c | planned | Numeric collider editor (custom halfExtents / radius / height), play mode, collision events |
+| 4c | done | Numeric collider editor: halfExtents / radius / height inputs with blur-clamp + blur-commit (one history entry per focus session) |
+| 4d | planned | Play mode: dynamic bodies, gravity-driven motion, body→asset transform sync on stop |
+| 4e | planned | Collision events: surface `beginContact` (read-only log, no full response UI) |
 | 5 | planned | Gaussian splat editor (`.splat`/`.ply`/`.spz`) |
 
 ## Run
@@ -27,39 +29,42 @@ npm run verify       # store + physics invariants (pure-Node, no browser needed)
 npm run smoke -- path/to/file.glb   # GLB loader sanity check
 ```
 
-## Phase 4b — known limitations
+## Phase 4 — known limitations
 
-The world mirrors the editor's collider graph, but a few edges are
-intentionally rough. They are tracked here so future phases (4c, 5)
-don't re-discover them.
+The collider graph + editor are real and tested, but a few edges are
+intentionally rough. They are tracked here so future phases don't
+re-discover them.
 
-1. **No numeric collider editor.** Sidebar shows a read-only spec
-   summary + reset-to-defaults. There is no UI to edit `halfExtents`,
-   `radius`, or `height` per asset yet — that's the main 4c deliverable.
-2. **No auto-fit to mesh.** Default colliders use fixed sizes
+### Editor UI (4c)
+
+1. **No auto-fit to mesh.** Default colliders use fixed sizes
    (`box: ±0.5`, `sphere: r=0.6`, `capsule: r=0.4 h=1.2`,
    `cylinder: r=0.5 h=1.2`). A loaded `.glb` mesh with a 3 m bounding
-   box gets a 1 m collider. The user must adjust in 4c.
-3. **Euler order is tracked, not assumed.** `ObjectTransform.rotation`
-   is now `[x, y, z, order]` (e.g. `'YXZ'`). The store round-trips
-   the order from `g.rotation.order` on every drag, the body
-   rebuilds its quaternion under that order, and the sidebar
-   displays the order badge. Only the gizmo itself doesn't expose
-   the order today — a future numeric transform inspector can set
-   it.
-4. **Non-active assets have invisible collider markers.** Only the
-   selected asset renders the marker in the viewport, but every asset
-   with a collider is reflected in the physics world. There is no
-   "show all colliders" toggle yet.
-5. **Scale envelope, not exact match.** For capsule + sphere, the
+   box gets a 1 m collider, which the user resizes with the numeric
+   editor. Auto-fit to the mesh's bounding box is a follow-up.
+
+### Physics (4b)
+
+2. **Static bodies only.** Phase 4d (play mode) flips them dynamic.
+3. **Scale envelope, not exact match.** For capsule + sphere, the
    body is a conservative envelope (uses `max(sx, sz)` / `max(sx, sy, sz)`),
    so it can extend beyond the visual in the unscaled axes. Acceptable
    for collision queries; a future phase can swap in ellipsoids if
    exactness matters.
-6. **Module-level singleton world.** Convenient for a single editor,
+4. **Module-level singleton world.** Convenient for a single editor,
    but it means HMR and multi-Canvas setups need care. `resetPhysicsWorld()`
    exists for tests. Moving the world into a React Context is on the
-   4c/5 backlog — not worth a refactor right now.
+   4d/4e backlog — not worth a refactor right now.
+
+### View (4a / 4c)
+
+5. **Non-active assets have invisible collider markers.** Only the
+   selected asset renders the marker in the viewport, but every asset
+   with a collider is reflected in the physics world. There is no
+   "show all colliders" toggle yet.
+6. **Euler order is tracked in the store but the gizmo doesn't expose
+   it.** A future numeric transform inspector can set the order via
+   the same input pattern the collider editor uses.
 
 ## Supported inputs (phase 3.1)
 
