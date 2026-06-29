@@ -10,8 +10,10 @@ Browser-based editor for mesh and gaussian-splat 3D assets.
 | 2 | done | Mesh upload (`.glb`/`.gltf`/`.obj`), drag-drop, auto-fit camera, error boundary |
 | 3 | done | Transform gizmos (W/E/R/F/Esc) + primitives (cube/sphere/cylinder); vertex edit + merge deferred |
 | 3.1 | done | Editor usability: undo/redo (⌘Z / ⌘⇧Z / Ctrl+Y), numeric transform inspector, axis lock (X/Y/Z), reset-to-identity, larger gizmo |
-| 4a | next | Visual collider markers (box/sphere/capsule/cylinder) bound to asset — sidebar shows Collider section in Collision mode |
-| 4 | planned | Collision shapes |
+| 3.2 | done | Drag commit-on-release (1 history entry per gizmo drag, was ~60/frame) |
+| 4a | done | Visual collider markers (box/sphere/capsule/cylinder) + camera refit-on-add + sidebar empty state |
+| 4b | done | cannon-es physics world mirrors the collider graph (one-way editor → physics sync, static bodies, capsule = compound, scale baked into shape) |
+| 4c | planned | Numeric collider editor (custom halfExtents / radius / height), play mode, collision events |
 | 5 | planned | Gaussian splat editor (`.splat`/`.ply`/`.spz`) |
 
 ## Run
@@ -21,6 +23,7 @@ npm install
 npm run dev          # http://127.0.0.1:5173
 npm run build        # production bundle (manualChunks: three / r3f / app)
 npm run typecheck    # tsc -b --noEmit
+npm run verify       # store + physics invariants (pure-Node, no browser needed)
 npm run smoke -- path/to/file.glb   # GLB loader sanity check
 ```
 
@@ -32,7 +35,7 @@ npm run smoke -- path/to/file.glb   # GLB loader sanity check
 | `.gltf` | drei `useGLTF` | external buffers must be reachable |
 | `.obj` | three `OBJLoader` | no MTL — falls back to a neutral PBR material |
 | primitive `cube` / `sphere` / `cylinder` | procedural | from sidebar buttons |
-| collider `box` / `sphere` / `capsule` / `cylinder` | visual marker | from sidebar in Collision mode; depth-test off so it shows through mesh |
+| collider `box` / `sphere` / `capsule` / `cylinder` | visual marker + cannon-es body | from sidebar in Collision mode; capsule body is a compound (Cylinder + 2 Sphere) |
 
 `.ply`, `.splat`, `.spz` are rejected with an explicit "phase 5" message.
 
@@ -91,7 +94,7 @@ scripts/
 - Vertex edit + merge (phase 3.2): transform layer in place, vertex picking + scene merge not done
 - `<primitive object={scene}>` should be replaced with `drei <Gltf>` or per-mesh JSX before phase 4b physics
 - `useGLTF` cache eviction when an asset is removed mid-load (current leak is bounded by the loader's promise, not by the GPU)
-- Phase 4b: real physics integration (cannon / rapier / custom), auto-convex / auto-trimesh from mesh, custom collider dimensions (per-collider halfExtents / radius / height)
+- Phase 4b: real physics integration (cannon / rapier / custom), auto-convex / auto-trimesh from mesh, custom collider dimensions (per-collider halfExtents / radius / height) — **shipped 4b** covers the engine + dimensions; numeric UI for custom dimensions + play mode + collision events are 4c
 - Prettier config (only ESLint installed today)
 
 ## Repository hygiene
