@@ -13,8 +13,8 @@ const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
   collision: {
     title: 'Collision mode',
     lines: [
-      'Pick a mesh, then assign a collider marker.',
-      'Phase 4a: box / sphere / capsule / cylinder (visual only).',
+      'Pick a mesh, then pick a collider type and resize its dimensions.',
+      'Bodies update live in the physics world (phase 4b).',
     ],
   },
   gaussian: {
@@ -112,12 +112,13 @@ export function Sidebar() {
         ))}
       </div>
 
-      {(() => {
-        // Phase 4a: Transform section is always visible (with a clear
-        // empty state) so ESC doesn't make the controls vanish mid-flow.
-        return (
-          <>
-            <h3 className="section-title">Transform</h3>
+      {/*
+        Phase 4a: Transform section is always visible (with a clear
+        empty state) so ESC doesn't make the controls vanish mid-flow.
+      */}
+      {(
+        <>
+          <h3 className="section-title">Transform</h3>
             {activeAsset ? (
               <>
                 <div className="transform-row">
@@ -180,9 +181,8 @@ export function Sidebar() {
                 Select an asset below — or add a primitive — to enable gizmo controls.
               </p>
             )}
-          </>
-        );
-      })()}
+        </>
+      )}
 
       {mode === 'collision' && (
         <>

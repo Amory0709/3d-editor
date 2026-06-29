@@ -22,11 +22,13 @@
  *    hard-block, we clamp the display value on commit).
  *
  *  - One history entry per focus session, not per keystroke. The
- *    same pattern as the gizmo drag-commit. Implemented by tracking
- *    a `commitOnBlur` wrapper the input component calls on focus
- *    loss — but the *decision* of whether the value actually changed
- *    is made by the caller (we just expose `parseClamped` and let
- *    the React layer manage the snapshot).
+ *    same pattern as the gizmo drag-commit. Implemented in
+ *    `ColliderEditor.NumberField` — it captures the pre-edit value
+ *    on focus, parses + clamps on blur, and only calls
+ *    `setAssetCollider` (which pushes a history entry) if the
+ *    parsed value actually differs. This module only exposes the
+ *    pure parse / clamp / apply helpers; the React layer owns the
+ *    no-op gate.
  */
 import type { ColliderSpec } from '@/lib/formats';
 

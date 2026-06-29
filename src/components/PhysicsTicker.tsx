@@ -14,8 +14,8 @@ import { stepWorld, syncBodies } from '@/lib/physics';
  *
  * Bodies are static (mass=0) in phase 4b, so the world step is a no-op
  * for collision resolution — it just keeps the engine "live" so future
- * phase-4c features (collision events, raycast queries) can hook in
- * without restructuring the loop.
+ * phase-4d (play mode) and phase-4e (collision events) features can
+ * hook in without restructuring the loop.
  */
 export function PhysicsTicker(): null {
   useFrame((_, dt) => {

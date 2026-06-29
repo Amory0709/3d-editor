@@ -10,10 +10,10 @@
  *     removed too
  *
  * Sync is one-way: editor → physics. Bodies are static (mass=0) so the
- * world's step() does not mutate them. Phase 4c will turn this into a
- * play mode with dynamic bodies; for now the world is just a live
- * in-memory representation that future features (raycast pick, play
- * mode, collision events) can query.
+ * world's step() does not mutate them. Phase 4d (play mode) will flip
+ * them dynamic; phase 4e (collision events) will surface beginContact.
+ * For now the world is just a live in-memory representation that those
+ * future features can hook into without restructuring the loop.
  *
  * The world is a module-level singleton. There is one editor, so one
  * world is correct. `resetPhysicsWorld()` is exposed for test isolation
@@ -79,15 +79,14 @@ export function getBodyCount(): number {
  */
 export function syncBodies(assets: readonly AssetRef[]): void {
   const w = getPhysicsWorld();
-  // Track which assets have a collider (i.e. should have a body). An
-  // asset in `assets` with `collider: null` still gets added to `seen`
-  // (so we don't false-positive on it as "removed") — but it doesn't
-  // get a body, and any existing body for it gets removed below.
-  const collidered = new Set<string>();
+  // Track asset IDs that should have a body (i.e. have a non-null
+  // collider). After the pass, any body whose asset isn't in this set
+  // is removed — covers both "asset deleted" and "collider cleared".
+  const shouldHaveBody = new Set<string>();
 
   for (const asset of assets) {
     if (!asset.collider) continue;
-    collidered.add(asset.id);
+    shouldHaveBody.add(asset.id);
 
     const key = shapeKey(asset.collider, asset.transform.scale);
     let body = bodyByAssetId.get(asset.id);
@@ -111,7 +110,7 @@ export function syncBodies(assets: readonly AssetRef[]): void {
   // Remove bodies for assets that disappeared, OR for assets still
   // in the list but with no collider (cleared via the sidebar).
   for (const [id, body] of bodyByAssetId) {
-    if (!collidered.has(id)) {
+    if (!shouldHaveBody.has(id)) {
       w.removeBody(body);
       bodyByAssetId.delete(id);
       lastShapeKey.delete(id);
