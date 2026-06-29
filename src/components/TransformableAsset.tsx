@@ -2,6 +2,7 @@ import { forwardRef } from 'react';
 import type { Group } from 'three';
 import type { AssetRef } from '@/store/editor';
 import { MeshRenderer } from './MeshRenderer';
+import { ColliderMarker } from './ColliderMarker';
 
 interface Props {
   asset: AssetRef;
@@ -16,6 +17,10 @@ interface Props {
  *  - MeshRenderer doesn't need to know about transforms.
  *  - Loading effect inside MeshRenderer fires on mount, regardless of
  *    whether the mesh is a primitive or a loaded file.
+ *
+ * The collider marker is a sibling of the mesh inside the same group,
+ * so it inherits the asset's transform automatically. Toggling the
+ * collider on/off in the sidebar just adds or removes this child.
  */
 export const TransformableAsset = forwardRef<Group, Props>(
   ({ asset }, ref) => (
@@ -26,6 +31,7 @@ export const TransformableAsset = forwardRef<Group, Props>(
       scale={asset.transform.scale}
     >
       <MeshRenderer asset={asset} />
+      {asset.collider && <ColliderMarker type={asset.collider.type} />}
     </group>
   ),
 );

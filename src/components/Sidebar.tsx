@@ -111,77 +111,95 @@ export function Sidebar() {
         ))}
       </div>
 
-      {activeAsset && (
-        <>
-          <h3 className="section-title">Transform</h3>
-          <div className="transform-row">
-            {(['translate', 'rotate', 'scale'] as TransformMode[]).map((m) => (
-              <button
-                key={m}
-                className={`transform-btn${transformMode === m ? ' active' : ''}`}
-                onClick={() => setTransformMode(m)}
-              >
-                {TRANSFORM_LABEL[m]}
-              </button>
-            ))}
-          </div>
-          <div className="axis-lock-row">
-            <span className="axis-lock-label">Lock axis</span>
-            {AXES.map((a) => (
-              <button
-                key={a}
-                className={`axis-btn${axisLock === a ? ' active' : ''}`}
-                onClick={() => setAxisLock(axisLock === a ? null : a)}
-                title={`Toggle ${a.toUpperCase()} axis lock`}
-              >
-                {AXIS_LABEL[a]}
-              </button>
-            ))}
-          </div>
-          <div className="transform-vals">
-            <div className="transform-vals-row">
-              <span className="transform-vals-label">pos</span>
-              <span className="transform-vals-text">{fmt3(activeAsset.transform.position)}</span>
-            </div>
-            <div className="transform-vals-row">
-              <span className="transform-vals-label">rot</span>
-              <span className="transform-vals-text">{fmt3(activeAsset.transform.rotation)}</span>
-            </div>
-            <div className="transform-vals-row">
-              <span className="transform-vals-label">scl</span>
-              <span className="transform-vals-text">{fmt3(activeAsset.transform.scale)}</span>
-            </div>
-          </div>
-          <button
-            className="reset-btn"
-            onClick={() => resetAssetTransform(activeAsset.id)}
-            title="Reset transform to identity"
-          >
-            ⟲ Reset transform
-          </button>
-        </>
-      )}
+      {(() => {
+        // Phase 4a: Transform section is always visible (with a clear
+        // empty state) so ESC doesn't make the controls vanish mid-flow.
+        return (
+          <>
+            <h3 className="section-title">Transform</h3>
+            {activeAsset ? (
+              <>
+                <div className="transform-row">
+                  {(['translate', 'rotate', 'scale'] as TransformMode[]).map((m) => (
+                    <button
+                      key={m}
+                      className={`transform-btn${transformMode === m ? ' active' : ''}`}
+                      onClick={() => setTransformMode(m)}
+                    >
+                      {TRANSFORM_LABEL[m]}
+                    </button>
+                  ))}
+                </div>
+                <div className="axis-lock-row">
+                  <span className="axis-lock-label">Lock axis</span>
+                  {AXES.map((a) => (
+                    <button
+                      key={a}
+                      className={`axis-btn${axisLock === a ? ' active' : ''}`}
+                      onClick={() => setAxisLock(axisLock === a ? null : a)}
+                      title={`Toggle ${a.toUpperCase()} axis lock`}
+                    >
+                      {AXIS_LABEL[a]}
+                    </button>
+                  ))}
+                </div>
+                <div className="transform-vals">
+                  <div className="transform-vals-row">
+                    <span className="transform-vals-label">pos</span>
+                    <span className="transform-vals-text">{fmt3(activeAsset.transform.position)}</span>
+                  </div>
+                  <div className="transform-vals-row">
+                    <span className="transform-vals-label">rot</span>
+                    <span className="transform-vals-text">{fmt3(activeAsset.transform.rotation)}</span>
+                  </div>
+                  <div className="transform-vals-row">
+                    <span className="transform-vals-label">scl</span>
+                    <span className="transform-vals-text">{fmt3(activeAsset.transform.scale)}</span>
+                  </div>
+                </div>
+                <button
+                  className="reset-btn"
+                  onClick={() => resetAssetTransform(activeAsset.id)}
+                  title="Reset transform to identity"
+                >
+                  ⟲ Reset transform
+                </button>
+              </>
+            ) : (
+              <p className="empty section-empty">
+                Select an asset below — or add a primitive — to enable gizmo controls.
+              </p>
+            )}
+          </>
+        );
+      })()}
 
-      {mode === 'collision' && activeAsset && (
+      {mode === 'collision' && (
         <>
           <h3 className="section-title">Collider</h3>
-          <div className="collider-grid">
-            <button
-              className={`collider-btn${activeAsset.collider === null ? ' active' : ''}`}
-              onClick={() => setAssetCollider(activeAsset.id, null)}
-            >
-              None
-            </button>
-            {COLLIDER_TYPES.map((c) => (
+          {activeAsset ? (
+            <div className="collider-grid">
               <button
-                key={c}
-                className={`collider-btn${activeAsset.collider?.type === c ? ' active' : ''}`}
-                onClick={() => setAssetCollider(activeAsset.id, { type: c })}
+                className={`collider-btn${activeAsset.collider === null ? ' active' : ''}`}
+                onClick={() => setAssetCollider(activeAsset.id, null)}
               >
-                {colliderLabel(c)}
+                None
               </button>
-            ))}
-          </div>
+              {COLLIDER_TYPES.map((c) => (
+                <button
+                  key={c}
+                  className={`collider-btn${activeAsset.collider?.type === c ? ' active' : ''}`}
+                  onClick={() => setAssetCollider(activeAsset.id, { type: c })}
+                >
+                  {colliderLabel(c)}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="empty section-empty">
+              Select an asset to assign a collider.
+            </p>
+          )}
         </>
       )}
 

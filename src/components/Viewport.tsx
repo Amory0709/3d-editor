@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import {
   Bounds,
@@ -152,25 +152,19 @@ function Scene({ refitNonce }: { refitNonce: number }) {
 
 export function Viewport() {
   const [isDragging, setDragging] = useState(false);
-  const [refitNonce, setRefitNonce] = useState(0);
+  const [localRefitNonce, setLocalRefitNonce] = useState(0);
   const error = useEditor((s) => s.error);
   const loading = useEditor((s) => s.loading);
   const setError = useEditor((s) => s.setError);
-  const activeAssetId = useEditor((s) => s.activeAssetId);
+  const storeRefitNonce = useEditor((s) => s.refitRequestNonce);
 
-  // Auto-fit camera on the first asset upload (not on every switch).
-  // See README follow-up "Bounds camera flash" — this is the phase-3 fix.
-  const hasFitFirstAssetRef = useRef(false);
-  useEffect(() => {
-    if (activeAssetId && !hasFitFirstAssetRef.current) {
-      hasFitFirstAssetRef.current = true;
-      setRefitNonce((n) => n + 1);
-    }
-  }, [activeAssetId]);
+  // Combine store-driven refits (every new asset upload) with
+  // local F-key refits. The Bounds key changes whenever either ticks.
+  const refitNonce = storeRefitNonce + localRefitNonce;
 
   // F key → manual re-fit.
   useEditorShortcuts({
-    onRefit: () => setRefitNonce((n) => n + 1),
+    onRefit: () => setLocalRefitNonce((n) => n + 1),
   });
 
   return (

@@ -123,6 +123,15 @@ interface EditorState {
   loading: boolean;
   setLoading: (loading: boolean) => void;
 
+  /**
+   * Camera-refit requests (phase 4a). The store bumps this counter on
+   * addAsset so the Viewport can re-run <Bounds> for the new asset.
+   * Decoupled from `setActiveAsset` so selection switches never refit,
+   * and decoupled from the F key so we can refit on uploads without
+   * a keyboard event.
+   */
+  refitRequestNonce: number;
+
   /** free-text error banner */
   error: string | null;
   setError: (error: string | null) => void;
@@ -167,6 +176,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       history: snapshotHistory(s.history, s.assets),
       assets: [...s.assets, asset],
       activeAssetId: asset.id,
+      // Refit on every new asset upload. Phase-3 review fix: a single
+      // 'first fit' rule left OBJ uploads and post-clear re-uploads
+      // unfitted. We don't refit on selection switch or removal —
+      // just on add.
+      refitRequestNonce: s.refitRequestNonce + 1,
     })),
 
   removeAsset: (id) =>
@@ -255,6 +269,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       history: snapshotHistory(s.history, s.assets),
       assets: [...s.assets, asset],
       activeAssetId: id,
+      // Match addAsset: every new asset upload triggers a refit.
+      refitRequestNonce: s.refitRequestNonce + 1,
     }));
   },
 
@@ -310,6 +326,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   loading: false,
   setLoading: (loading) => set({ loading }),
+
+  refitRequestNonce: 0,
 
   error: null,
   setError: (error) => set({ error }),
