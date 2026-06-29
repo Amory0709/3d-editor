@@ -182,7 +182,16 @@ export function Sidebar() {
                   </div>
                   <div className="transform-vals-row">
                     <span className="transform-vals-label">rot</span>
-                    <span className="transform-vals-text">{fmt3(activeAsset.transform.rotation)}</span>
+                    <span className="transform-vals-text">
+                      {fmt3([
+                        activeAsset.transform.rotation[0],
+                        activeAsset.transform.rotation[1],
+                        activeAsset.transform.rotation[2],
+                      ])}{' '}
+                      <span className="transform-vals-order">
+                        {activeAsset.transform.rotation[3]}
+                      </span>
+                    </span>
                   </div>
                   <div className="transform-vals-row">
                     <span className="transform-vals-label">scl</span>

@@ -55,7 +55,12 @@ function Scene({ refitNonce }: { refitNonce: number }) {
   const readGroupTransform = useCallback(
     (g: Group): ObjectTransform => ({
       position: [g.position.x, g.position.y, g.position.z],
-      rotation: [g.rotation.x, g.rotation.y, g.rotation.z],
+      // rotation includes the Euler order so downstream consumers
+      // (physics) don't have to re-assert XYZ. THREE's default order
+      // is 'XYZ' — the gizmo currently doesn't change it, but if a
+      // future numeric inspector or shortcut rotates via a different
+      // order, the body will follow exactly.
+      rotation: [g.rotation.x, g.rotation.y, g.rotation.z, g.rotation.order],
       scale: [g.scale.x, g.scale.y, g.scale.z],
     }),
     [],

@@ -40,11 +40,13 @@ don't re-discover them.
    (`box: ±0.5`, `sphere: r=0.6`, `capsule: r=0.4 h=1.2`,
    `cylinder: r=0.5 h=1.2`). A loaded `.glb` mesh with a 3 m bounding
    box gets a 1 m collider. The user must adjust in 4c.
-3. **Euler order is hard-coded to 'XYZ'.** Matches three's default and
-   the gizmo's, so it's safe today. If anyone changes
-   `g.rotation.order` later, the body's quaternion will diverge. The
-   order-agnostic fix (store a quaternion in the transform) is on the
-   4c/5 backlog.
+3. **Euler order is tracked, not assumed.** `ObjectTransform.rotation`
+   is now `[x, y, z, order]` (e.g. `'YXZ'`). The store round-trips
+   the order from `g.rotation.order` on every drag, the body
+   rebuilds its quaternion under that order, and the sidebar
+   displays the order badge. Only the gizmo itself doesn't expose
+   the order today — a future numeric transform inspector can set
+   it.
 4. **Non-active assets have invisible collider markers.** Only the
    selected asset renders the marker in the viewport, but every asset
    with a collider is reflected in the physics world. There is no

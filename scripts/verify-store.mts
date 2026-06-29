@@ -93,7 +93,7 @@ const cubeAsset = useEditor.getState().assets.find((a) => a.id === cubeId)!;
   const pastBefore = useEditor.getState().history.past.length;
   useEditor.getState().setAssetTransform(id, {
     position: [5, 0, 0],
-    rotation: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
     scale: [1, 1, 1],
   });
   const grew = useEditor.getState().history.past.length - pastBefore;

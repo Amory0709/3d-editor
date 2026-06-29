@@ -148,13 +148,15 @@ function updateBodyTransform(
     transform.position[1],
     transform.position[2],
   );
-  // Three's Euler order is XYZ; cannon's setFromEuler takes a string
-  // order param. Use 'XYZ' to match the rest of the editor.
+  // The store's rotation tuple carries the Euler order so we don't
+  // have to assume 'XYZ' here. cannon-es setFromEuler takes the same
+  // order strings three does ('XYZ' | 'YZX' | 'ZXY' | 'XZY' | 'YXZ'
+  // | 'ZYX'), so the value round-trips exactly.
   body.quaternion.setFromEuler(
     transform.rotation[0],
     transform.rotation[1],
     transform.rotation[2],
-    'XYZ',
+    transform.rotation[3],
   );
 }
 

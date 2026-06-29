@@ -6,6 +6,7 @@
  * scale handling, lifecycle (add/remove/clear).
  */
 import * as CANNON from 'cannon-es';
+import * as THREE from 'three';
 import { useEditor } from '@/store/editor';
 import { DEFAULT_COLLIDER, type ColliderSpec } from '@/lib/formats';
 import {
@@ -134,7 +135,7 @@ function reset(): void {
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
   useEditor.getState().setAssetTransform(id, {
     position: [1.5, -2.5, 3.75],
-    rotation: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
     scale: [1, 1, 1],
   });
   syncBodies(useEditor.getState().assets);
@@ -154,7 +155,7 @@ function reset(): void {
   useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
   useEditor.getState().setAssetTransform(id, {
     position: [0, 0, 0],
-    rotation: [Math.PI / 2, 0, Math.PI / 4],
+    rotation: [Math.PI / 2, 0, Math.PI / 4, 'XYZ'],
     scale: [1, 1, 1],
   });
   syncBodies(useEditor.getState().assets);
@@ -169,6 +170,60 @@ function reset(): void {
     ok,
     `got(${q.x.toFixed(4)}, ${q.y.toFixed(4)}, ${q.z.toFixed(4)}, ${q.w.toFixed(4)})`,
   );
+}
+
+// ─── Test 7b: non-XYZ Euler order round-trips exactly ──────────
+// Regression: pre-refactor, physics.ts hard-coded 'XYZ' when
+// building the body quaternion. A rotation that was authored in
+// 'YXZ' would be re-applied under 'XYZ' and the body would diverge
+// from the visual. This test compares the body's quaternion to the
+// quaternion three itself would produce from the same Euler, to
+// lock in that the order is forwarded.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
+  // Authored in YXZ — common for FPS / third-person characters.
+  // At (π/4, π/4, 0) under YXZ the body quaternion has z = -0.1464;
+  // under XYZ with the same numbers z = +0.1464. These differ in
+  // sign, so the test is sensitive to which order is used.
+  useEditor.getState().setAssetTransform(id, {
+    position: [0, 0, 0],
+    rotation: [Math.PI / 4, Math.PI / 4, 0, 'YXZ'],
+    scale: [1, 1, 1],
+  });
+  syncBodies(useEditor.getState().assets);
+  const body = getBodyForAsset(id)!;
+
+  // Build the same quaternion in three's convention. This is the
+  // source of truth — the body must match it bit-for-bit.
+  const e = new THREE.Euler(Math.PI / 4, Math.PI / 4, 0, 'YXZ');
+  const q = new THREE.Quaternion().setFromEuler(e);
+  const ok =
+    approx(body.quaternion.x, q.x, 1e-5) &&
+    approx(body.quaternion.y, q.y, 1e-5) &&
+    approx(body.quaternion.z, q.z, 1e-5) &&
+    approx(body.quaternion.w, q.w, 1e-5);
+  check(
+    '7b. body quaternion = Euler under YXZ order (order is forwarded, not hard-coded XYZ)',
+    ok,
+    `body=(${body.quaternion.x.toFixed(4)}, ${body.quaternion.y.toFixed(4)}, ${body.quaternion.z.toFixed(4)}, ${body.quaternion.w.toFixed(4)}) expected=(${q.x.toFixed(4)}, ${q.y.toFixed(4)}, ${q.z.toFixed(4)}, ${q.w.toFixed(4)})`,
+  );
+
+  // And confirm it DIFFERS from the would-be-XYZ interpretation —
+  // otherwise the test is vacuous. The Z component of the YXZ
+  // result is negative; under XYZ it would be positive. So if the
+  // physics layer dropped the order and re-applied XYZ, the sign
+  // would flip and this would fail.
+  const xyzE = new THREE.Euler(Math.PI / 4, Math.PI / 4, 0, 'XYZ');
+  const xyzQ = new THREE.Quaternion().setFromEuler(xyzE);
+  const differs =
+    !approx(body.quaternion.x, xyzQ.x, 1e-5) ||
+    !approx(body.quaternion.y, xyzQ.y, 1e-5) ||
+    !approx(body.quaternion.z, xyzQ.z, 1e-5) ||
+    !approx(body.quaternion.w, xyzQ.w, 1e-5);
+  check('7c. YXZ body quaternion differs from XYZ interpretation (test is sensitive)', differs);
 }
 
 // ─── Test 8: body is static (mass=0) ────────────────────────────────
@@ -190,7 +245,7 @@ function reset(): void {
   useEditor.getState().setAssetCollider(id, { type: 'box', halfExtents: [0.5, 0.5, 0.5] });
   useEditor.getState().setAssetTransform(id, {
     position: [0, 0, 0],
-    rotation: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
     scale: [2, 1, 1],
   });
   syncBodies(useEditor.getState().assets);
@@ -212,7 +267,7 @@ function reset(): void {
   useEditor.getState().setAssetCollider(id, { type: 'sphere', radius: 0.6 });
   useEditor.getState().setAssetTransform(id, {
     position: [0, 0, 0],
-    rotation: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
     scale: [3, 1, 1],
   });
   syncBodies(useEditor.getState().assets);
@@ -270,7 +325,7 @@ function reset(): void {
     useEditor.getState().setAssetCollider(id, c.spec);
     useEditor.getState().setAssetTransform(id, {
       position: [0, 0, 0],
-      rotation: [0, 0, 0],
+      rotation: [0, 0, 0, 'XYZ'],
       scale: [2, 1, 1],
     });
     syncBodies(useEditor.getState().assets);
@@ -394,7 +449,7 @@ function reset(): void {
   const first = getBodyForAsset(id);
   useEditor.getState().setAssetTransform(id, {
     position: [5, 0, 0],
-    rotation: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
     scale: [1, 1, 1],
   });
   syncBodies(useEditor.getState().assets);
@@ -472,7 +527,7 @@ function reset(): void {
   const before = getBodyForAsset(id);
   useEditor.getState().setAssetTransform(id, {
     position: [0, 0, 0],
-    rotation: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
     scale: [2, 2, 2], // scale change
   });
   syncBodies(useEditor.getState().assets);

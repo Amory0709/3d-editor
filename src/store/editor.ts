@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { EulerOrder } from 'three';
 import {
   GAUSSIAN_FORMATS,
   type AssetFormat,
@@ -7,16 +8,23 @@ import {
   type PrimitiveType,
 } from '@/lib/formats';
 
-/** Object transform in world space, stored per asset. */
+/** Object transform in world space, stored per asset.
+ *  - `rotation` is `[x, y, z, order]` where `order` is the Euler order
+ *    (matches THREE.Euler.order). The order is tracked so downstream
+ *    consumers (physics) can re-build a quaternion without re-asserting
+ *    a default — the gizmo or a future numeric inspector can rotate in
+ *    YXZ without losing fidelity.
+ *  - `scale` is local object scale; collider shapes bake the scale into
+ *    their halfExtents / radius (see lib/physics.ts). */
 export interface ObjectTransform {
   position: [number, number, number];
-  rotation: [number, number, number];
+  rotation: [number, number, number, EulerOrder];
   scale: [number, number, number];
 }
 
 export const DEFAULT_TRANSFORM: ObjectTransform = {
   position: [0, 0, 0],
-  rotation: [0, 0, 0],
+  rotation: [0, 0, 0, 'XYZ'],
   scale: [1, 1, 1],
 };
 
@@ -163,6 +171,7 @@ function transformsEqual(
     a.rotation[0] === b.rotation[0] &&
     a.rotation[1] === b.rotation[1] &&
     a.rotation[2] === b.rotation[2] &&
+    a.rotation[3] === b.rotation[3] &&
     a.scale[0] === b.scale[0] &&
     a.scale[1] === b.scale[1] &&
     a.scale[2] === b.scale[2]

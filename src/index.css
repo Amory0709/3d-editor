@@ -237,6 +237,11 @@ button.primary:hover { filter: brightness(1.08); }
 .sidebar .transform-vals-text {
   color: var(--text);
 }
+.sidebar .transform-vals-order {
+  color: var(--muted, #6b7484);
+  font-size: 10px;
+  margin-left: 4px;
+}
 
 .sidebar .reset-btn {
   width: 100%;
