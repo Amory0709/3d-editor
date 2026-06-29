@@ -78,6 +78,19 @@ interface EditorState {
   removeAsset: (id: string) => void;
   setActiveAsset: (id: string | null) => void;
   setAssetTransform: (id: string, transform: ObjectTransform) => void;
+  /**
+   * Live transform update — does NOT push history and does NOT clear redo.
+   * Used by TransformControls during a gizmo drag, so each onObjectChange
+   * frame doesn't pollute the undo stack with intermediate positions.
+   * The drag is committed via {@link commitTransformDrag} on mouse-up.
+   */
+  setAssetTransformLive: (id: string, transform: ObjectTransform) => void;
+  /**
+   * Commit a gizmo drag — pushes the pre-drag assets snapshot to the undo
+   * stack so a single ⌘Z reverts the entire drag, not just the last frame.
+   * If the transform didn't actually change, this is a no-op.
+   */
+  commitTransformDrag: (preDragAssets: AssetRef[]) => void;
   resetAssetTransform: (id: string) => void;
   setAssetCollider: (id: string, collider: ColliderSpec | null) => void;
 
@@ -99,6 +112,12 @@ interface EditorState {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  /**
+   * Test-only escape hatch: clear both undo and redo stacks. Not used by
+   * the UI. Keeps verification scripts from needing to page-reload
+   * between cases.
+   */
+  resetHistoryForTest: () => void;
 
   /** global busy flag while parsing/loading a file */
   loading: boolean;
@@ -115,6 +134,24 @@ function snapshotHistory(prev: History, current: AssetRef[]): History {
   // Cap the stack so we don't grow unbounded.
   if (past.length > HISTORY_LIMIT) past.shift();
   return { past, future: [] };
+}
+
+/** Cheap structural equality on a transform triple. */
+function transformsEqual(
+  a: ObjectTransform,
+  b: ObjectTransform,
+): boolean {
+  return (
+    a.position[0] === b.position[0] &&
+    a.position[1] === b.position[1] &&
+    a.position[2] === b.position[2] &&
+    a.rotation[0] === b.rotation[0] &&
+    a.rotation[1] === b.rotation[1] &&
+    a.rotation[2] === b.rotation[2] &&
+    a.scale[0] === b.scale[0] &&
+    a.scale[1] === b.scale[1] &&
+    a.scale[2] === b.scale[2]
+  );
 }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -152,6 +189,39 @@ export const useEditor = create<EditorState>((set, get) => ({
       history: snapshotHistory(s.history, s.assets),
       assets: s.assets.map((a) => (a.id === id ? { ...a, transform } : a)),
     })),
+
+  setAssetTransformLive: (id, transform) =>
+    set((s) => ({
+      // Live update during a gizmo drag — no history, no future clear.
+      // The drag is committed once on mouse-up via commitTransformDrag.
+      assets: s.assets.map((a) => (a.id === id ? { ...a, transform } : a)),
+    })),
+
+  commitTransformDrag: (preDragAssets) => {
+    const current = get().assets;
+    // Quick guard: if the transform didn't actually change (e.g. user
+    // clicked the gizmo without dragging), don't pollute the undo stack.
+    if (
+      preDragAssets.length === current.length &&
+      preDragAssets.every((pre, i) => {
+        const cur = current[i];
+        return (
+          cur &&
+          cur.id === pre.id &&
+          transformsEqual(pre.transform, cur.transform)
+        );
+      })
+    ) {
+      return;
+    }
+    set((s) => {
+      const past = [...s.history.past, preDragAssets];
+      if (past.length > HISTORY_LIMIT) past.shift();
+      return {
+        history: { past, future: [] },
+      };
+    });
+  },
 
   resetAssetTransform: (id) =>
     set((s) => ({
@@ -235,6 +305,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   canUndo: () => get().history.past.length > 0,
   canRedo: () => get().history.future.length > 0,
+
+  resetHistoryForTest: () => set({ history: { past: [], future: [] } }),
 
   loading: false,
   setLoading: (loading) => set({ loading }),

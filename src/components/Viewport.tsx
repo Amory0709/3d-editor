@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import {
   Bounds,
@@ -10,7 +10,7 @@ import {
   TransformControls,
 } from '@react-three/drei';
 import type { Group } from 'three';
-import { useEditor } from '@/store/editor';
+import { useEditor, type AssetRef, type ObjectTransform } from '@/store/editor';
 import { handleFiles } from '@/lib/upload';
 import { TransformableAsset } from './TransformableAsset';
 import { DemoCube } from './DemoCube';
@@ -35,12 +35,30 @@ function Scene({ refitNonce }: { refitNonce: number }) {
   const transformMode = useEditor((s) => s.transformMode);
   const axisLock = useEditor((s) => s.axisLock);
   const setAssetTransform = useEditor((s) => s.setAssetTransform);
+  const setAssetTransformLive = useEditor((s) => s.setAssetTransformLive);
+  const commitTransformDrag = useEditor((s) => s.commitTransformDrag);
   const showDemo = !activeAsset;
 
   // Ref to the controlled group so TransformControls can attach to it.
   // We use a callback ref that triggers a state update so TransformControls
   // renders AFTER the group has mounted (otherwise its `object` prop is null).
   const [groupObj, setGroupObj] = useState<Group | null>(null);
+
+  // Gizmo drag state. onObjectChange fires every frame while the user is
+  // dragging the gizmo, so we route those updates through the "live" action
+  // (no history push). The pre-drag assets snapshot is captured on mouseDown
+  // and pushed onto the undo stack once on mouseUp — see commitTransformDrag.
+  const isDraggingRef = useRef(false);
+  const preDragAssetsRef = useRef<AssetRef[] | null>(null);
+
+  const readGroupTransform = useCallback(
+    (g: Group): ObjectTransform => ({
+      position: [g.position.x, g.position.y, g.position.z],
+      rotation: [g.rotation.x, g.rotation.y, g.rotation.z],
+      scale: [g.scale.x, g.scale.y, g.scale.z],
+    }),
+    [],
+  );
 
   // The Bounds key only changes when refitNonce changes — i.e. on the very
   // first asset load (set by parent) or when the user presses F. Asset
@@ -91,20 +109,31 @@ function Scene({ refitNonce }: { refitNonce: number }) {
           showX={axisLock === null || axisLock === 'x'}
           showY={axisLock === null || axisLock === 'y'}
           showZ={axisLock === null || axisLock === 'z'}
+          onMouseDown={() => {
+            // Capture the pre-drag assets snapshot. Read from the store
+            // directly (not from a React selector) to avoid stale-closure
+            // issues on rapid consecutive drags.
+            isDraggingRef.current = true;
+            preDragAssetsRef.current = useEditor.getState().assets;
+          }}
+          onMouseUp={() => {
+            isDraggingRef.current = false;
+            if (preDragAssetsRef.current) {
+              commitTransformDrag(preDragAssetsRef.current);
+              preDragAssetsRef.current = null;
+            }
+          }}
           onObjectChange={() => {
-            setAssetTransform(activeAsset.id, {
-              position: [
-                groupObj.position.x,
-                groupObj.position.y,
-                groupObj.position.z,
-              ],
-              rotation: [
-                groupObj.rotation.x,
-                groupObj.rotation.y,
-                groupObj.rotation.z,
-              ],
-              scale: [groupObj.scale.x, groupObj.scale.y, groupObj.scale.z],
-            });
+            const t = readGroupTransform(groupObj);
+            if (isDraggingRef.current) {
+              // During a drag: live update, no history push.
+              setAssetTransformLive(activeAsset.id, t);
+            } else {
+              // External mutation path (e.g. reset button or future
+              // keyboard nudge): normal setAssetTransform with one
+              // history entry.
+              setAssetTransform(activeAsset.id, t);
+            }
           }}
         />
       )}
