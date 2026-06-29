@@ -82,6 +82,24 @@ interface History {
 
 const HISTORY_LIMIT = 100;
 
+/** Phase 4e: ring-buffer cap for the collision log. When more than
+ *  this many events have fired in the current play session, the
+ *  oldest are dropped to keep the UI list bounded. 100 ≈ a busy
+ *  play session of many short contacts; older events are not
+ *  interesting once the user is investigating a specific collision. */
+const COLLISION_LOG_LIMIT = 100;
+
+/** One collision event for the sidebar log. `a` and `b` are
+ *  canonical asset ids (a < b by string compare). `t` is the
+ *  playClock value (seconds since the current play started) at
+ *  the moment the event was pushed; the sidebar uses it to render
+ *  "X.Xs ago" relative to the live playClock. */
+export interface CollisionEvent {
+  a: string;
+  b: string;
+  t: number;
+}
+
 interface EditorState {
   mode: EditorMode;
   setMode: (mode: EditorMode) => void;
@@ -137,6 +155,30 @@ interface EditorState {
     position: [number, number, number],
     rotation: [number, number, number, EulerOrder],
   ) => void;
+
+  /**
+   * Phase 4e: collision log. Newest events at the END of the array
+   * (the order cannon-es fired them during stepWorld). Capped at
+   * `COLLISION_LOG_LIMIT`; when a push would exceed the cap, the
+   * oldest entries are dropped. Persists across play stops so the
+   * user can review "what just happened" after stopping; cleared on
+   * the next play start.
+   *
+   * `(a, b)` is canonicalized (a < b by string compare) so the same
+   * physical contact produces the same entry regardless of which
+   * body's listener fired first. Asset names are looked up by the
+   * sidebar at render time, not stored here.
+   */
+  collisionEvents: CollisionEvent[];
+  /** Append new events with a play-clock timestamp; drops oldest if cap exceeded. */
+  addCollisionEvents: (
+    events: ReadonlyArray<{ a: string; b: string }>,
+    atTime: number,
+  ) => void;
+  /** Play-clock seconds since the current play started. Reset to 0
+   *  on setPlayMode(true); ticked each frame by PhysicsTicker. */
+  playClock: number;
+  tickPlayClock: (dt: number) => void;
 
   /** primitive authoring (phase 3) */
   addPrimitive: (type: PrimitiveType) => void;
@@ -355,14 +397,20 @@ export const useEditor = create<EditorState>((set, get) => ({
         // De-select so the gizmo doesn't show a stale "active" target
         // once bodies take over. The play-mode UI will indicate state.
         activeAssetId: null,
+        // Phase 4e: clear the previous play's collision log + reset
+        // the clock. The log is intentionally NOT cleared on stop
+        // (so the user can review "what just happened" after stopping),
+        // but a fresh play starts a fresh log.
+        collisionEvents: [],
+        playClock: 0,
       });
     } else {
-      // Exiting play: the actual transform write-back happens in
-      // PhysicsTicker's stop path (which is where the bodies are
-      // and where we want to be authoritative). Here we just flip
-      // the flag. The body → asset write is done by the ticker
-      // immediately before this flag flips, so a read of asset.transform
-      // after this setPlayMode(false) returns the final play state.
+      // Exiting play: the body → asset writes were already done by
+      // PhysicsTicker in the most recent play-mode frame, so the
+      // store's assets already reflect each body's final position.
+      // We just flip the flag. playClock + collisionEvents are kept
+      // so the sidebar can still show "X.Xs ago" relative to the
+      // last playClock value (frozen at stop time).
       set({ playMode: false });
     }
   },
@@ -378,6 +426,32 @@ export const useEditor = create<EditorState>((set, get) => ({
           };
         }),
       };
+    }),
+
+  collisionEvents: [],
+  addCollisionEvents: (events, atTime) =>
+    set((s) => {
+      // Skip the work entirely on no-op calls (the ticker calls this
+      // every frame; most frames have zero events).
+      if (events.length === 0) return s;
+      // Stamp each event with the current playClock and append to the
+      // log. Drop the oldest entries if the cap would be exceeded.
+      const stamped = events.map((e) => ({ ...e, t: atTime }));
+      const next = [...s.collisionEvents, ...stamped];
+      if (next.length > COLLISION_LOG_LIMIT) {
+        next.splice(0, next.length - COLLISION_LOG_LIMIT);
+      }
+      return { collisionEvents: next };
+    }),
+
+  playClock: 0,
+  tickPlayClock: (dt) =>
+    set((s) => {
+      // Phase 4e: only ticks during play. Editor calls this every
+      // frame from PhysicsTicker; we no-op when not in play so a
+      // stray call from elsewhere doesn't drift the clock.
+      if (!s.playMode) return s;
+      return { playClock: s.playClock + dt };
     }),
 
   addPrimitive: (type) => {

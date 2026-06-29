@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { useEditor } from '@/store/editor';
 import { DEFAULT_COLLIDER, type ColliderSpec } from '@/lib/formats';
 import {
+  drainCollisionEvents,
   getBodyCount,
   getBodyForAsset,
   getPhysicsWorld,
@@ -953,6 +954,260 @@ function reset(): void {
     '30c. after reset() + edit sync, body is static (mass=0, STATIC)',
     body.mass === 0 && body.type === CANNON.Body.STATIC,
     `mass=${body.mass} type=${body.type}`,
+  );
+}
+
+// ─── Test 31: beginContact fires when dynamic bodies touch ──────
+// Phase 4e: a sphere dropped onto a cube produces a beginContact
+// event. Both bodies' listeners fire; drainCollisionEvents() dedups
+// the canonical pair to a single entry.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const cubeId = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(cubeId, DEFAULT_COLLIDER.box);
+  useEditor.getState().addPrimitive('sphere');
+  const sphereId = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(sphereId, DEFAULT_COLLIDER.sphere);
+  // Cube sits at the origin (top face at y=0.5). Sphere sits just
+  // above, slightly overlapping so the very first step fires contact.
+  useEditor.getState().setAssetTransform(cubeId, {
+    position: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  useEditor.getState().setAssetTransform(sphereId, {
+    position: [0, 0.9, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+
+  useEditor.getState().setPlayMode(true);
+  syncBodies(useEditor.getState().assets, true);
+  // Single step should generate the contact (sphere center at y=0.9,
+  // radius 0.5, bottom at 0.4 — overlapping the cube top at 0.5).
+  stepWorld(1 / 60);
+
+  const events = drainCollisionEvents();
+  // Order-independent: build a canonical pair string regardless of
+  // which id is smaller. The listener canonicalizes to (a < b), but
+  // the test shouldn't depend on the listener's ordering.
+  const pairKey = (x: string, y: string): string => (x < y ? `${x}|${y}` : `${y}|${x}`);
+  check(
+    '31. beginContact fires for (cube, sphere) — canonical pair',
+    events.length === 1 &&
+      pairKey(events[0].a, events[0].b) === pairKey(cubeId, sphereId),
+    `events=${JSON.stringify(events)} expected=${pairKey(cubeId, sphereId)}`,
+  );
+
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 32: drain dedups the "both listeners fire" case ───────
+// Phase 4e: cannon-es fires one beginContact per body per contact.
+// Both bodies' listeners push the same canonical pair; drain returns
+// ONE entry per unique pair, not two.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const a = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(a, DEFAULT_COLLIDER.box);
+  useEditor.getState().addPrimitive('sphere');
+  const b = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(b, DEFAULT_COLLIDER.sphere);
+  useEditor.getState().setAssetTransform(a, {
+    position: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  useEditor.getState().setAssetTransform(b, {
+    position: [0, 0.9, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  useEditor.getState().setPlayMode(true);
+  syncBodies(useEditor.getState().assets, true);
+  stepWorld(1 / 60);
+  // cannon-es may fire beginContact multiple times per step for the
+  // same pair (one per contact equation). We expect ONE entry after
+  // dedup; if cannon-es fires 2+ raw events, dedup collapses them.
+  const events = drainCollisionEvents();
+  const uniquePairs = new Set(events.map((e) => `${e.a}|${e.b}`));
+  check(
+    '32. drainCollisionEvents returns unique pairs only (dedup)',
+    uniquePairs.size === events.length,
+    `raw=${events.length} unique=${uniquePairs.size}`,
+  );
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 33: edit mode produces no collision events ───────────
+// Phase 4e: static bodies don't fire beginContact (no listener
+// attached at build time). Sanity check that we're not leaking
+// events into the edit-mode pipeline.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const a = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(a, DEFAULT_COLLIDER.box);
+  useEditor.getState().addPrimitive('sphere');
+  const b = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(b, DEFAULT_COLLIDER.sphere);
+  syncBodies(useEditor.getState().assets, false);
+  stepWorld(1 / 60);
+  stepWorld(1 / 60);
+  const events = drainCollisionEvents();
+  check(
+    '33. edit-mode (static) bodies emit no collision events',
+    events.length === 0,
+    `events=${events.length}`,
+  );
+}
+
+// ─── Test 34: store: setPlayMode(true) clears the log + resets clock ─
+// Phase 4e: a fresh play starts with a clean slate. Previous
+// play's events are wiped, playClock = 0.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
+  useEditor.getState().setPlayMode(true);
+  syncBodies(useEditor.getState().assets, true);
+  // Drop the body onto another to fire events.
+  useEditor.getState().setAssetTransform(id, {
+    position: [0, 0, 0],
+    rotation: [0, 0, 0, 'XYZ'],
+    scale: [1, 1, 1],
+  });
+  // Synthesize an event manually so we don't depend on physics timing.
+  useEditor.getState().addCollisionEvents([{ a: 'x', b: 'y' }], 1.0);
+  // Tick the clock a bit.
+  useEditor.getState().tickPlayClock(0.5);
+  useEditor.getState().setPlayMode(false);
+  check(
+    '34a. after first play, log has 1 entry + clock = 0.5',
+    useEditor.getState().collisionEvents.length === 1 &&
+      useEditor.getState().playClock === 0.5,
+  );
+  // Now re-enter play: log clears, clock resets.
+  useEditor.getState().setPlayMode(true);
+  check(
+    '34b. setPlayMode(true) clears the log and resets playClock',
+    useEditor.getState().collisionEvents.length === 0 &&
+      useEditor.getState().playClock === 0,
+  );
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 35: stop preserves the log (so the user can review) ──
+// Phase 4e: stop should NOT clear the log. The user just pressed
+// Stop after watching bodies fall; they want to read "what
+// collided?" without it vanishing.
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
+  useEditor.getState().setPlayMode(true);
+  useEditor.getState().addCollisionEvents(
+    [
+      { a: 'cube-a', b: 'cube-b' },
+      { a: 'cube-c', b: 'cube-d' },
+    ],
+    0.1,
+  );
+  useEditor.getState().setPlayMode(false);
+  check(
+    '35. setPlayMode(false) preserves the collision log',
+    useEditor.getState().collisionEvents.length === 2,
+  );
+}
+
+// ─── Test 36: addCollisionEvents respects the 100-cap ───────────
+// Phase 4e: ring-buffer cap. Push 150 entries; oldest 50 drop off.
+{
+  reset();
+  useEditor.getState().setPlayMode(true);
+  const first = [];
+  for (let i = 0; i < 50; i++) {
+    first.push({ a: `a${i}`, b: `b${i}` });
+  }
+  useEditor.getState().addCollisionEvents(first, 0.0);
+  const second = [];
+  for (let i = 50; i < 150; i++) {
+    second.push({ a: `a${i}`, b: `b${i}` });
+  }
+  useEditor.getState().addCollisionEvents(second, 1.0);
+  const log = useEditor.getState().collisionEvents;
+  check(
+    '36a. log length capped at 100',
+    log.length === 100,
+    `len=${log.length}`,
+  );
+  check(
+    '36b. oldest 50 entries dropped (a50 is now first)',
+    log[0].a === 'a50',
+    `first.a=${log[0].a}`,
+  );
+  check(
+    '36c. newest entry preserved (a149 is last)',
+    log[99].a === 'a149',
+    `last.a=${log[99].a}`,
+  );
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 37: tickPlayClock is no-op in edit mode ───────────────
+// Phase 4e: the clock should only advance during play. A stray
+// call from elsewhere doesn't drift it.
+{
+  reset();
+  check('37-pre. playClock starts at 0', useEditor.getState().playClock === 0);
+  useEditor.getState().tickPlayClock(5);
+  check(
+    '37. tickPlayClock is a no-op when playMode is false',
+    useEditor.getState().playClock === 0,
+    `clock=${useEditor.getState().playClock}`,
+  );
+  useEditor.getState().setPlayMode(true);
+  useEditor.getState().tickPlayClock(0.25);
+  check(
+    '37b. tickPlayClock advances in play mode',
+    Math.abs(useEditor.getState().playClock - 0.25) < 1e-9,
+    `clock=${useEditor.getState().playClock}`,
+  );
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 38: append order is preserved (FIFO, newest at end) ──
+// Phase 4e: the store just appends — it does NOT canonicalize or
+// re-order. Canonicalization happens at the listener boundary
+// (test 31 verifies end-to-end). This test pins the append-order
+// contract so the sidebar's "most recent first" rendering stays
+// stable if someone tries to optimize the store action later.
+{
+  reset();
+  useEditor.getState().setPlayMode(true);
+  useEditor.getState().addCollisionEvents([{ a: 'first-a', b: 'first-b' }], 0.1);
+  useEditor.getState().addCollisionEvents(
+    [
+      { a: 'second-a', b: 'second-b' },
+      { a: 'third-a', b: 'third-b' },
+    ],
+    0.2,
+  );
+  useEditor.getState().setPlayMode(false);
+  const log = useEditor.getState().collisionEvents;
+  check('38a. log length is 3', log.length === 3, `len=${log.length}`);
+  check(
+    '38b. log preserves insertion order (oldest first)',
+    log[0].a === 'first-a' && log[1].a === 'second-a' && log[2].a === 'third-a',
+  );
+  check(
+    '38c. timestamps are preserved as-given',
+    log[0].t === 0.1 && log[1].t === 0.2 && log[2].t === 0.2,
+    `ts=${JSON.stringify(log.map((e) => e.t))}`,
   );
 }
 

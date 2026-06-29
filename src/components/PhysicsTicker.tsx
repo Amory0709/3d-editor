@@ -1,6 +1,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useEditor } from '@/store/editor';
 import {
+  drainCollisionEvents,
   readBodiesToAssets,
   stepWorld,
   syncBodies,
@@ -26,6 +27,12 @@ import {
  *     (TransformableAsset) follows. Bodies' scale is left alone —
  *     the store keeps the existing scale when position+rotation
  *     are written.
+ *
+ *   • Play mode (4e): `stepWorld` fires `beginContact` events on
+ *     dynamic bodies. After the step, we drain the event buffer and
+ *     push the entries into the store (with the current playClock
+ *     as the timestamp) for the sidebar to render. Tick playClock
+ *     by dt so "X.Xs ago" labels update over time.
  */
 export function PhysicsTicker(): null {
   useFrame((_, dt) => {
@@ -38,9 +45,17 @@ export function PhysicsTicker(): null {
       // follow. The next setPlayMode(false) call will leave assets
       // already at the body's final position.
       stepWorld(dt);
+      // Phase 4e: advance the play clock BEFORE draining so the
+      // timestamps on this frame's events match the post-step time
+      // (so a "0.1s ago" event was 0.1s before this frame).
+      state.tickPlayClock(dt);
       const updates = readBodiesToAssets();
       for (const u of updates) {
         state.setAssetTransformFromPlay(u.assetId, u.position, u.rotation);
+      }
+      const events = drainCollisionEvents();
+      if (events.length > 0) {
+        state.addCollisionEvents(events, state.playClock);
       }
     }
     // Edit mode: no step. Bodies are static — `syncBodies` already

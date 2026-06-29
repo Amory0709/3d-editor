@@ -69,6 +69,33 @@ export function Sidebar() {
     ? assets.find((a) => a.id === activeAssetId) ?? null
     : null;
 
+  // Phase 4e: collision log read-out. The store keeps the newest
+  // entries at the end of the array; we render the most recent
+  // entries first so the user sees fresh events at the top.
+  const collisionEvents = useEditor((s) => s.collisionEvents);
+  const playClock = useEditor((s) => s.playClock);
+  // Cap the visible list at 10 — the store keeps up to 100 but the
+  // sidebar only shows the most recent. Keeps the panel from
+  // scrolling the user's view off when a busy play session fires
+  // dozens of contacts.
+  const visibleEvents = collisionEvents.slice(-10).reverse();
+  /** Look up a human-readable name for an asset, falling back to
+   *  "(deleted)" if the asset was removed after the event fired
+   *  (e.g. user removed it after stopping play). */
+  function nameForAsset(id: string): string {
+    return assets.find((a) => a.id === id)?.name ?? '(deleted)';
+  }
+  /** Format an elapsed time as "X.Xs ago" / "Xms ago" / "X.Xm ago".
+   *  PlayClock freezes on stop (we don't keep ticking in edit mode),
+   *  so post-stop labels show "time since the event happened in
+   *  the most recent play". */
+  function formatElapsed(seconds: number): string {
+    if (seconds < 0) return 'just now';
+    if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms ago`;
+    if (seconds < 60) return `${seconds.toFixed(1)}s ago`;
+    return `${(seconds / 60).toFixed(1)}m ago`;
+  }
+
   return (
     <aside className="sidebar">
       <h3>{blurb.title}</h3>
@@ -272,6 +299,36 @@ export function Sidebar() {
             </div>
           ))}
         </div>
+      )}
+
+      {/*
+        Phase 4e: collision log (read-only). Visible always — in
+        edit mode it shows the last play's events with frozen
+        "X.Xs ago" labels (playClock doesn't tick after stop); in
+        play mode the labels count up live. Empty state stays for
+        "no collisions yet" so the user knows the section is alive.
+      */}
+      <h3 className="section-title">Collisions ({collisionEvents.length})</h3>
+      {visibleEvents.length === 0 ? (
+        <p className="empty">
+          {playMode
+            ? 'No collisions yet — bodies are simulating.'
+            : 'No collisions recorded. Press P (▶ Play) to start a simulation.'}
+        </p>
+      ) : (
+        <ul className="collision-log">
+          {visibleEvents.map((e, i) => (
+            <li key={`${e.a}-${e.b}-${i}`} className="collision-log-row">
+              <span className="collision-log-pair">
+                {nameForAsset(e.a)} <span className="collision-log-x">⨯</span>{' '}
+                {nameForAsset(e.b)}
+              </span>
+              <span className="collision-log-time">
+                {formatElapsed(playClock - e.t)}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </aside>
   );

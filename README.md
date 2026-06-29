@@ -15,7 +15,7 @@ Browser-based editor for mesh and gaussian-splat 3D assets.
 | 4b | done | cannon-es physics world mirrors the collider graph (one-way editor → physics sync, static bodies, capsule = compound, scale baked into shape) — see [Known limitations](#phase-4b--known-limitations) |
 | 4c | done | Numeric collider editor: halfExtents / radius / height inputs with blur-clamp + blur-commit (one history entry per focus session) |
 | 4d | done | Play mode: Toolbar Play/Stop button (P shortcut), bodies flip dynamic, world.step() drives them, body→asset transform sync on stop (one history entry per play session) |
-| 4e | planned | Collision events: surface `beginContact` (read-only log, no full response UI) |
+| 4e | done | Collision events: world-level `beginContact` listener, sidebar log shows last 10 contacts with elapsed time, canonical (a < b) dedup, log persists across stop, clears on next play |
 | 5 | planned | Gaussian splat editor (`.splat`/`.ply`/`.spz`) |
 
 ## Run
@@ -43,7 +43,7 @@ re-discover them.
    box gets a 1 m collider, which the user resizes with the numeric
    editor. Auto-fit to the mesh's bounding box is a follow-up.
 
-### Physics (4b / 4d)
+### Physics (4b / 4d / 4e)
 
 2. **Scale envelope, not exact match.** For capsule + sphere, the
    body is a conservative envelope (uses `max(sx, sz)` / `max(sx, sy, sz)`),
@@ -60,10 +60,16 @@ re-discover them.
 4. **No collider edits during play.** Changing type or dimensions
    mid-simulation would require rebuilding a dynamic body mid-step,
    which cannon-es doesn't support. Stop first, edit, re-play.
-5. **Module-level singleton world.** Convenient for a single editor,
+5. **beginContact, not `collide`.** The sidebar logs `'beginContact'`
+   events (one entry per pair, fires once when bodies first touch).
+   The per-body `'collide'` event fires every frame for every
+   contact equation — too noisy for a read-only log. Contact info
+   (normal, impulse, contact point) isn't surfaced in 4e; it's a
+   future phase if/when we add trigger volumes or response UI.
+6. **Module-level singleton world.** Convenient for a single editor,
    but it means HMR and multi-Canvas setups need care. `resetPhysicsWorld()`
    exists for tests. Moving the world into a React Context is on the
-   4e/5 backlog — not worth a refactor right now.
+   5 backlog — not worth a refactor right now.
 
 ### View (4a / 4c)
 

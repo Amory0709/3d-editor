@@ -1,9 +1,10 @@
 /**
- * Physics world (phase 4b).
+ * Physics world (phase 4b / 4d / 4e).
  *
  * Owns a single cannon-es World that mirrors the editor's asset graph:
- *   • every asset with a `collider` gets a static body in the world
+ *   • every asset with a `collider` gets a body in the world
  *   • body position / rotation track the asset's transform each frame
+ *     (edit mode only; in play mode the body is the source of truth)
  *   • body shape (radius / halfExtents / height) tracks the collider
  *     spec × asset scale
  *   • when an asset is removed or its collider cleared, the body is
@@ -12,11 +13,17 @@
  * Sync is one-way: editor → physics in edit mode; in play mode
  * (phase 4d) bodies become dynamic and the world.step() drives them,
  * with the body's transform flowing back into the asset each frame.
- * Phase 4e (collision events) will surface beginContact on top of this.
+ *
+ * Phase 4e: dynamic bodies emit `beginContact` events via a listener
+ * attached at build time. The listener pushes to a module-level buffer
+ * keyed by canonical (a, b) asset-id pair (a < b by string compare).
+ * Callers drain the buffer after each stepWorld via
+ * `drainCollisionEvents()`. Drain-time dedup handles cannon-es's
+ * "one event per body per contact" — two listeners (one per body)
+ * produce the same canonical pair, so we collapse to one entry.
  *
  * The world is a module-level singleton. There is one editor, so one
- * world is correct. `resetPhysicsWorld()` is exposed for test isolation
- * (and for a future "Clear physics" debug action).
+ * world is correct. `resetPhysicsWorld()` is exposed for test isolation.
  */
 import * as CANNON from 'cannon-es';
 import { Euler, Quaternion, type EulerOrder } from 'three';
@@ -31,14 +38,35 @@ let world: CANNON.World | null = null;
  *  survives world rebuilds and so callers can introspect bodies
  *  without scanning world.bodies every frame. */
 const bodyByAssetId = new Map<string, CANNON.Body>();
+/** body → assetId (phase 4e). Reverse of bodyByAssetId, used by the
+ *  beginContact listener to translate cannon-es body refs into the
+ *  asset ids the store cares about. Maintained in lock-step with
+ *  bodyByAssetId. */
+const assetIdByBody = new Map<CANNON.Body, string>();
 /** assetId → last shape spec key. Used to avoid rebuilding a body
  *  when only its position/rotation changed (the common case). */
 const lastShapeKey = new Map<string, string>();
+/** Phase 4e: collision events captured from beginContact listeners
+ *  during stepWorld. Drained by `drainCollisionEvents()` after each
+ *  frame; entries are pushed (not spliced) so the order is the order
+ *  cannon-es fired them in. Dedup happens at drain time on the
+ *  canonical (a, b) pair. */
+const pendingCollisionEvents: Array<{ a: string; b: string }> = [];
 
 /** Lazily create the world. Gravity = -9.81 on Y, real-world-ish. */
 export function getPhysicsWorld(): CANNON.World {
   if (!world) {
     world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
+    // Phase 4e: ONE world-level 'beginContact' listener. cannon-es
+    // fires this event on the WORLD (not on the bodies) — see its
+    // emitContactEvents(). Each event has bodyA and bodyB; we look
+    // both up in assetIdByBody to translate to our asset ids.
+    //
+    // Attaching once on the world is cleaner than per-body listeners:
+    // the listener doesn't move with bodies (bodies get rebuilt on
+    // shape/dynamic changes), and we don't have to track listener
+    // lifecycle as bodies come and go.
+    world.addEventListener('beginContact', onBeginContact);
   }
   return world;
 }
@@ -51,7 +79,9 @@ export function resetPhysicsWorld(): void {
     }
   }
   bodyByAssetId.clear();
+  assetIdByBody.clear();
   lastShapeKey.clear();
+  pendingCollisionEvents.length = 0;
   world = null;
 }
 
@@ -100,10 +130,15 @@ export function syncBodies(assets: readonly AssetRef[], dynamic: boolean): void 
       // Shape / dynamicity changed (or first time) → rebuild
       if (body) {
         w.removeBody(body);
+        // Phase 4e: drop the reverse-map entry for the old body.
+        // The body is unreachable after this; its 'beginContact'
+        // listener will GC with it.
+        assetIdByBody.delete(body);
       }
       body = buildBody(asset.collider, asset.transform, dynamic);
       w.addBody(body);
       bodyByAssetId.set(asset.id, body);
+      assetIdByBody.set(body, asset.id);
       lastShapeKey.set(asset.id, key);
     } else if (!dynamic) {
       // Edit mode: same shape, just update transform to track the asset.
@@ -119,6 +154,7 @@ export function syncBodies(assets: readonly AssetRef[], dynamic: boolean): void 
     if (!shouldHaveBody.has(id)) {
       w.removeBody(body);
       bodyByAssetId.delete(id);
+      assetIdByBody.delete(body);
       lastShapeKey.delete(id);
     }
   }
@@ -181,7 +217,58 @@ export function stepWorld(dt: number): void {
   world.step(FIXED_STEP, clampedDt, MAX_SUB_STEPS);
 }
 
+/**
+ * Phase 4e: drain the beginContact buffer accumulated during the
+ * most recent stepWorld(s). Returns the dedup'd list of pairs in
+ * the order cannon-es fired them (with duplicates collapsed to the
+ * first occurrence). Clears the buffer so the next call returns
+ * only events fired AFTER this drain.
+ *
+ * Dedup is on the canonical pair (a < b by string compare). cannon-es
+ * fires one beginContact per body per contact, so a single "A touched
+ * B" produces two events; we collapse to one entry.
+ *
+ * The buffer is intentionally not drained inside stepWorld — we want
+ * the caller (PhysicsTicker) to push the events into the store ONCE
+ * per frame, not once per body. Per-frame batching keeps React
+ * re-render storms at bay even when many bodies collide at once.
+ */
+export function drainCollisionEvents(): ReadonlyArray<{ a: string; b: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ a: string; b: string }> = [];
+  for (const e of pendingCollisionEvents) {
+    const key = `${e.a}|${e.b}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  pendingCollisionEvents.length = 0;
+  return out;
+}
+
 /* ─── internals ───────────────────────────────────────────────────── */
+
+/**
+ * Phase 4e: cannon-es world-level beginContact handler. cannon-es
+ * dispatches beginContact ON THE WORLD (not on the bodies); the
+ * event has `bodyA` and `bodyB`. We look both up in assetIdByBody
+ * to translate to our asset ids and push a canonical (a < b) pair.
+ *
+ * Attached once in getPhysicsWorld() so it survives body rebuilds.
+ * If either body is missing from the map (the world has a body that
+ * we don't know about — shouldn't happen in normal use), we skip the
+ * event rather than emit a partial entry.
+ */
+function onBeginContact(event: {
+  bodyA: CANNON.Body;
+  bodyB: CANNON.Body;
+}): void {
+  const aId = assetIdByBody.get(event.bodyA);
+  const bId = assetIdByBody.get(event.bodyB);
+  if (!aId || !bId) return;
+  const [a, b] = aId < bId ? [aId, bId] : [bId, aId];
+  pendingCollisionEvents.push({ a, b });
+}
 
 function shapeKey(
   spec: ColliderSpec,
@@ -225,6 +312,13 @@ function buildBody(
   // world.step() actually moves it. Edit mode keeps the
   // phase-4b contract (mass = 0, STATIC) — the body mirrors
   // the asset but never moves on its own.
+  //
+  // Phase 4e note: we do NOT attach a beginContact listener per
+  // body. cannon-es dispatches that event on the WORLD, not on
+  // bodies — see getPhysicsWorld() for the single world-level
+  // listener. Attaching to bodies is a no-op for beginContact
+  // (would work for the per-body 'collide' event, but that's a
+  // different event with different semantics).
   const body = new CANNON.Body({
     mass: dynamic ? 1 : 0,
     type: dynamic ? CANNON.Body.DYNAMIC : CANNON.Body.STATIC,
