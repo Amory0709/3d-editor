@@ -433,9 +433,17 @@ export const useEditor = create<EditorState>((set, get) => ({
       // Skip the work entirely on no-op calls (the ticker calls this
       // every frame; most frames have zero events).
       if (events.length === 0) return s;
-      // Stamp each event with the current playClock and append to the
-      // log. Drop the oldest entries if the cap would be exceeded.
-      const stamped = events.map((e) => ({ ...e, t: atTime }));
+      // Defense in depth: the physics drain canonicalizes (a < b) and
+      // dedups, but addCollisionEvents is a public store action — any
+      // future caller (Playwright via window.__editor, a future
+      // trigger-volume API, etc.) could push raw {a:'z', b:'a'} and
+      // produce a duplicate-looking entry in the sidebar. Sort here
+      // so the store contract is "always canonical" regardless of
+      // caller.
+      const stamped = events.map((e) => {
+        const [a, b] = e.a < e.b ? [e.a, e.b] : [e.b, e.a];
+        return { a, b, t: atTime };
+      });
       const next = [...s.collisionEvents, ...stamped];
       if (next.length > COLLISION_LOG_LIMIT) {
         next.splice(0, next.length - COLLISION_LOG_LIMIT);

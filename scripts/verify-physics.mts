@@ -1181,11 +1181,10 @@ function reset(): void {
 }
 
 // ─── Test 38: append order is preserved (FIFO, newest at end) ──
-// Phase 4e: the store just appends — it does NOT canonicalize or
-// re-order. Canonicalization happens at the listener boundary
-// (test 31 verifies end-to-end). This test pins the append-order
-// contract so the sidebar's "most recent first" rendering stays
-// stable if someone tries to optimize the store action later.
+// Phase 4e: the store appends and now also canonicalizes (a < b).
+// For already-canonical inputs this is a no-op, so insertion
+// order is still preserved. Test 39 pins the canonicalize
+// contract for non-canonical inputs.
 {
   reset();
   useEditor.getState().setPlayMode(true);
@@ -1208,6 +1207,39 @@ function reset(): void {
     '38c. timestamps are preserved as-given',
     log[0].t === 0.1 && log[1].t === 0.2 && log[2].t === 0.2,
     `ts=${JSON.stringify(log.map((e) => e.t))}`,
+  );
+}
+
+// ─── Test 39: addCollisionEvents canonicalizes (a < b) ───────────
+// Phase 4e-fix: the physics drain canonicalizes, but
+// addCollisionEvents is a public store action. If a future caller
+// (Playwright via window.__editor, a trigger-volume API, etc.)
+// pushes {a:'z', b:'a'}, the sidebar would show a duplicate-
+// looking entry. The store now sorts the pair on insert so the
+// contract is "always canonical" regardless of caller.
+{
+  reset();
+  useEditor.getState().setPlayMode(true);
+  // Push in REVERSED order; store must normalize to a < b.
+  useEditor.getState().addCollisionEvents(
+    [
+      { a: 'zebra', b: 'apple' },
+      { a: 'mango', b: 'banana' },
+    ],
+    0.5,
+  );
+  useEditor.getState().setPlayMode(false);
+  const log = useEditor.getState().collisionEvents;
+  check('39a. log length is 2', log.length === 2, `len=${log.length}`);
+  check(
+    '39b. pair #1 is canonical (a < b)',
+    log[0].a === 'apple' && log[0].b === 'zebra',
+    `got (${log[0].a}, ${log[0].b})`,
+  );
+  check(
+    '39c. pair #2 is canonical (a < b)',
+    log[1].a === 'banana' && log[1].b === 'mango',
+    `got (${log[1].a}, ${log[1].b})`,
   );
 }
 

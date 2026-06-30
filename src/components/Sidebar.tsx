@@ -90,7 +90,10 @@ export function Sidebar() {
    *  so post-stop labels show "time since the event happened in
    *  the most recent play". */
   function formatElapsed(seconds: number): string {
-    if (seconds < 0) return 'just now';
+    // Anything within 50ms of "just happened" rounds to "just now",
+    // so an event that fires the same frame as the render reads as
+    // "just now" instead of "0ms ago".
+    if (seconds <= 0.05) return 'just now';
     if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms ago`;
     if (seconds < 60) return `${seconds.toFixed(1)}s ago`;
     return `${(seconds / 60).toFixed(1)}m ago`;
@@ -317,8 +320,8 @@ export function Sidebar() {
         </p>
       ) : (
         <ul className="collision-log">
-          {visibleEvents.map((e, i) => (
-            <li key={`${e.a}-${e.b}-${i}`} className="collision-log-row">
+          {visibleEvents.map((e) => (
+            <li key={`${e.a}-${e.b}-${e.t}`} className="collision-log-row">
               <span className="collision-log-pair">
                 {nameForAsset(e.a)} <span className="collision-log-x">⨯</span>{' '}
                 {nameForAsset(e.b)}
