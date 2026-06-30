@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { EulerOrder } from 'three';
 import {
-  GAUSSIAN_FORMATS,
   type AssetFormat,
   type AssetKind,
   type ColliderSpec,
@@ -549,19 +548,3 @@ export const useEditor = create<EditorState>((set, get) => ({
   error: null,
   setError: (error) => set({ error }),
 }));
-
-/** Pure helpers (also re-exported from lib/formats for backward compat). */
-export function detectFormat(name: string): AssetFormat {
-  const lower = name.toLowerCase();
-  if (lower.endsWith('.glb')) return 'glb';
-  if (lower.endsWith('.gltf')) return 'gltf';
-  if (lower.endsWith('.obj')) return 'obj';
-  if (lower.endsWith('.splat')) return 'splat';
-  if (lower.endsWith('.ply')) return 'ply';
-  if (lower.endsWith('.spz')) return 'spz';
-  return 'unknown';
-}
-
-export function classifyKind(format: AssetFormat): AssetKind {
-  return GAUSSIAN_FORMATS.has(format) ? 'gaussian' : 'mesh';
-}
