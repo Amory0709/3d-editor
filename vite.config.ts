@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
 export default defineConfig({
+  // Project page on GitHub Pages: https://<owner>.github.io/3d-editor/
+  // The base path is required so Vite prepends /3d-editor/ to all
+  // emitted asset URLs. For local dev this is overridden automatically
+  // by Vite (assets resolve from /).
+  base: '/3d-editor/',
   plugins: [react()],
   resolve: {
     alias: {
