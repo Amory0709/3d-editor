@@ -6,10 +6,16 @@ import { useEditor } from '@/store/editor';
 /**
  * Phase 3.2 — module-level registry mapping asset id -> BufferGeometry.
  *
- * Each renderer (GLTFMesh / OBJMesh / PrimitiveRenderer) calls
- * `registerGeometry(id, geometry)` from inside its mount effect.
- * EditableMesh reads via `getGeometry(id)` from inside its useFrame
- * (which already runs every frame, so a stale ref is fine).
+ * Each renderer (`<EditableMesh>` via its GLB / OBJ / Primitive
+ * dispatch components) calls `registerGeometry(id, geometry)` from
+ * inside its mount effect. EditableMesh reads via `getGeometry(id)`
+ * from inside its useFrame (which already runs every frame, so a
+ * stale ref is fine).
+ *
+ * Phase 4 refactor: `<MeshRenderer>` / `<PrimitiveRenderer>` were
+ * the original callers; both were deleted in favor of always-
+ * rendering `<EditableMesh>` (so vertex edits persist when the
+ * active asset changes — see TransformableAsset for the fix).
  *
  * We deliberately use a module-level Map instead of React state or
  * context: BufferGeometry is a Three.js object with GPU buffers, not

@@ -2,7 +2,6 @@ import { forwardRef, useImperativeHandle, useRef, useLayoutEffect } from 'react'
 import type { Group } from 'three';
 import type { AssetRef } from '@/store/editor';
 import { useEditor } from '@/store/editor';
-import { MeshRenderer } from './MeshRenderer';
 import { EditableMesh } from './EditableMesh';
 import { ColliderMarker } from './ColliderMarker';
 
@@ -10,7 +9,11 @@ interface Props {
   asset: AssetRef;
   /** Click handler — wires mesh click to set this asset as active. */
   onSelect?: () => void;
-  /** When true, render EditableMesh instead of MeshRenderer. */
+  /** When true, the asset is the active one being edited. Gates the
+   *  INTERACTIVE layer in EditableMesh (vertex handles, wireframe,
+   *  DoubleSide). The geometry + vertexOffsets application ALWAYS
+   *  runs, regardless of this flag, so vertex edits persist when
+   *  switching to another asset. */
   editable?: boolean;
 }
 
@@ -57,7 +60,27 @@ export const TransformableAsset = forwardRef<Group, Props>(
       );
     });
 
-    const useEditable = editable === true && isEditMode;
+    // The interactive layer (vertex handles, wireframe, DoubleSide
+    // material) only makes sense when the asset is BOTH the active
+    // one AND the editor is in edit mode. The geometry + per-frame
+    // vertexOffsets application ALWAYS runs — that is the whole
+    // point of always rendering <EditableMesh>: vertex edits are
+    // part of the asset's persistent visual state, not an
+    // interactive affordance of "currently selected".
+    //
+    // Bug fixed (2026-07-01 session #4): previously we swapped
+    // <EditableMesh> for <MeshRenderer> when useEditable was
+    // false. MeshRenderer created a brand-new BufferGeometry
+    // (or pulled a cached GLB scene) on mount and never applied
+    // vertexOffsets, so the moment the user clicked another
+    // asset the original cube's edits vanished — they were
+    // sitting in the previous (now-disposed) BufferGeometry
+    // that <EditableMesh>'s useFrame had been mutating. The
+    // only way to see the edits again was to click back to the
+    // edited asset so <EditableMesh> remounted and re-snapshotted
+    // the (pristine) base — but the offsets WERE in vertexOffsets
+    // all along; they just had no mesh to render against.
+    const interactive = editable === true && isEditMode;
 
     return (
       <group
@@ -65,14 +88,11 @@ export const TransformableAsset = forwardRef<Group, Props>(
         position={asset.transform.position}
         scale={asset.transform.scale}
       >
-        {useEditable ? (
-          <EditableMesh asset={asset} onSelect={onSelect ? () => onSelect() : undefined} />
-        ) : (
-          <MeshRenderer
-            asset={asset}
-            onSelect={onSelect ? () => onSelect() : undefined}
-          />
-        )}
+        <EditableMesh
+          asset={asset}
+          onSelect={onSelect ? () => onSelect() : undefined}
+          interactive={interactive}
+        />
         {asset.collider && <ColliderMarker spec={asset.collider} />}
       </group>
     );

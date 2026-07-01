@@ -27,19 +27,30 @@ import { makeGeometry } from './PrimitiveRenderer';
 interface Props {
   asset: AssetRef;
   onSelect?: () => void;
+  /**
+   * When true, render the INTERACTIVE layer (vertex handles, wireframe,
+   * DoubleSide material). When false, still render the geometry with
+   * vertexOffsets applied — so vertex edits remain visible when the
+   * asset is not the active one or when not in edit mode — but skip the
+   * interaction affordances.
+   *
+   * Set to true only when the asset is BOTH the active one AND the
+   * editor is in edit mode (controlled by the parent TransformableAsset).
+   */
+  interactive?: boolean;
 }
 
 /**
  * Phase 3.2a — vertex-level mesh editing.
  *
  * Renders an asset's geometry with `vertexOffsets` applied on top of the
- * base positions, shows every vertex as a yellow point in the viewport
- * for picking, and exposes a "selected vertex" handle the user can drag
- * via the keyboard arrow keys or by clicking-and-dragging the handle.
+ * base positions. The geometry + offset application ALWAYS runs (so
+ * vertex edits persist across mode changes / asset switches); the
+ * interactive layer (vertex handles, wireframe, DoubleSide) only
+ * appears when the `interactive` prop is true.
  *
- * Used as a drop-in replacement for the inner mesh of `<MeshRenderer>`
- * when in Edit mode. Does NOT handle the transform wrapper or the
- * collider marker -- those live in TransformableAsset.
+ * Does NOT handle the transform wrapper or the collider marker --
+ * those live in TransformableAsset.
  *
  * Dispatch design (rules-of-hooks fix):
  *   `useAssetGeometry` previously called different numbers of hooks
@@ -56,26 +67,37 @@ interface Props {
  *   count. Each child then renders the shared `EditableMeshBody`,
  *   which holds the rest of the logic and gets `geometry` as a prop.
  */
-export function EditableMesh({ asset, onSelect }: Props) {
+export function EditableMesh({ asset, onSelect, interactive }: Props) {
   if (asset.source === 'primitive' && asset.primitiveType) {
     return (
       <PrimitiveEditable
         asset={asset}
         onSelect={onSelect}
         primitiveType={asset.primitiveType}
+        interactive={interactive}
       />
     );
   }
   if (asset.format === 'glb' || asset.format === 'gltf') {
     if (!asset.url) return null;
     return (
-      <GLBEditable asset={asset} onSelect={onSelect} url={asset.url} />
+      <GLBEditable
+        asset={asset}
+        onSelect={onSelect}
+        url={asset.url}
+        interactive={interactive}
+      />
     );
   }
   if (asset.format === 'obj') {
     if (!asset.url) return null;
     return (
-      <OBJEditable asset={asset} onSelect={onSelect} url={asset.url} />
+      <OBJEditable
+        asset={asset}
+        onSelect={onSelect}
+        url={asset.url}
+        interactive={interactive}
+      />
     );
   }
   return null;
@@ -86,16 +108,25 @@ function PrimitiveEditable({
   asset,
   onSelect,
   primitiveType,
+  interactive,
 }: {
   asset: AssetRef;
   onSelect: Props['onSelect'];
   primitiveType: PrimitiveType;
+  interactive?: boolean;
 }) {
   const geometry = useMemo(
     () => makeGeometry(primitiveType),
     [primitiveType],
   );
-  return <EditableMeshBody asset={asset} onSelect={onSelect} geometry={geometry} />;
+  return (
+    <EditableMeshBody
+      asset={asset}
+      onSelect={onSelect}
+      geometry={geometry}
+      interactive={interactive}
+    />
+  );
 }
 
 /** Per-type dispatch target for glTF / GLB assets. */
@@ -103,14 +134,23 @@ function GLBEditable({
   asset,
   onSelect,
   url,
+  interactive,
 }: {
   asset: AssetRef;
   onSelect: Props['onSelect'];
   url: string;
+  interactive?: boolean;
 }) {
   const gltf = useGLTF(url);
   const geometry = useMemo(() => firstMeshGeometry(gltf?.scene), [gltf]);
-  return <EditableMeshBody asset={asset} onSelect={onSelect} geometry={geometry} />;
+  return (
+    <EditableMeshBody
+      asset={asset}
+      onSelect={onSelect}
+      geometry={geometry}
+      interactive={interactive}
+    />
+  );
 }
 
 /** Per-type dispatch target for OBJ assets. */
@@ -118,14 +158,23 @@ function OBJEditable({
   asset,
   onSelect,
   url,
+  interactive,
 }: {
   asset: AssetRef;
   onSelect: Props['onSelect'];
   url: string;
+  interactive?: boolean;
 }) {
   const obj = useLoader(OBJLoader, url);
   const geometry = useMemo(() => firstMeshGeometry(obj), [obj]);
-  return <EditableMeshBody asset={asset} onSelect={onSelect} geometry={geometry} />;
+  return (
+    <EditableMeshBody
+      asset={asset}
+      onSelect={onSelect}
+      geometry={geometry}
+      interactive={interactive}
+    />
+  );
 }
 
 /** Walk a loaded root and return the first mesh's geometry (or null). */
@@ -238,10 +287,12 @@ function EditableMeshBody({
   asset,
   onSelect,
   geometry,
+  interactive,
 }: {
   asset: AssetRef;
   onSelect: Props['onSelect'];
   geometry: BufferGeometry | null;
+  interactive?: boolean;
 }) {
   const vertexOffsets = asset.vertexOffsets;
   const commitMakeFace = useEditor((s) => s.commitMakeFace);
@@ -249,7 +300,29 @@ function EditableMeshBody({
   const mode = useEditor((s) => s.mode);
   const selectedVertices = useEditor((s) => s.selectedVertices);
   const toggleSelectedVertex = useEditor((s) => s.toggleSelectedVertex);
+  const setLoading = useEditor((s) => s.setLoading);
   const isEditMode = mode === 'edit';
+  // The interactive layer (vertex handles, wireframe, DoubleSide)
+  // is only meaningful when both the editor is in edit mode AND this
+  // asset is the active one. The `interactive` prop encodes both
+  // conditions collapsed by the parent. We compute `showInteractives`
+  // locally to keep the call sites readable; isEditMode is still
+  // needed below to short-circuit the F-key handler when not in
+  // edit mode (orthogonal concern).
+  const showInteractives = interactive === true && isEditMode;
+
+  // Clear the global `loading` flag once this renderer has actually
+  // mounted with the asset. This was previously inside
+  // <MeshRenderer>, which we replaced with always-rendered
+  // <EditableMesh> in phase 4 (bug: vertex edits vanished when
+  // switching assets). For useGLTF / useLoader children that
+  // suspend, this effect runs after the loader resolves — exactly
+  // when the toolbar 'Loading…' tag should disappear. Runs for
+  // every asset mount, which is fine because setLoading(false) is
+  // idempotent.
+  useEffect(() => {
+    setLoading(false);
+  }, [asset.id, setLoading]);
 
   // Phase 3.2a — snapshot the ORIGINAL base positions once per geometry.
   // The useFrame below applies vertexOffsets to the base on every frame.
@@ -364,12 +437,19 @@ function EditableMeshBody({
         EdgesGeometry(threshold=1) only shows ≥1° dihedral edges and
         hides those 0° diagonals.
       */}
-      <LiveWireframe
-        geometry={geometry}
-        color="#1a2540"
-        includeDiagonals={true}
-      />
-      {isEditMode && vertexCount > 0 && (
+      {/*
+        Wireframe is only meaningful in edit mode (it's an editing
+        affordance, not a permanent visual). Outside the interactive
+        layer the deformed mesh itself communicates the edits.
+      */}
+      {showInteractives && (
+        <LiveWireframe
+          geometry={geometry}
+          color="#1a2540"
+          includeDiagonals={true}
+        />
+      )}
+      {showInteractives && vertexCount > 0 && (
         <VertexOverlay
           geometry={geometry}
           assetId={asset.id}

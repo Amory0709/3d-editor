@@ -1,15 +1,18 @@
-import { useEffect, useMemo } from 'react';
-import type { ThreeEvent } from '@react-three/fiber';
 import { BoxGeometry, CylinderGeometry, SphereGeometry } from 'three';
-import type { AssetRef } from '@/store/editor';
 import type { PrimitiveType } from '@/lib/formats';
 
-interface Props {
-  asset: AssetRef;
-  onSelect?: (e: ThreeEvent<MouseEvent>) => void;
-}
-
-/** Build a BufferGeometry for a given primitive type. */
+/**
+ * Build a BufferGeometry for a given primitive type.
+ *
+ * Used by `<EditableMesh>` via `PrimitiveEditable` — both active and
+ * inactive primitive assets now share the same geometry pipeline
+ * (always-mounted EditableMesh), so this is the single place that
+ * creates primitive geometries.
+ *
+ * Geometry lifecycle: created in `useMemo([primitiveType])` inside
+ * PrimitiveEditable, disposed via the `useEffect` cleanup in
+ * EditableMeshBody.
+ */
 export function makeGeometry(type: PrimitiveType) {
   switch (type) {
     case 'cube':
@@ -19,35 +22,4 @@ export function makeGeometry(type: PrimitiveType) {
     case 'cylinder':
       return new CylinderGeometry(0.5, 0.5, 1.2, 32);
   }
-}
-
-/**
- * Procedural mesh geometry for primitive assets (cube / sphere / cylinder).
- * Geometry is created once per primitive type via useMemo and disposed
- * on unmount to keep GPU buffers clean.
- *
- * Transform is applied by the TransformableAsset wrapper, not here —
- * so the mesh's world position/rotation/scale stays at identity and the
- * wrapper group's transform drives everything.
- */
-export function PrimitiveRenderer({ asset, onSelect }: Props) {
-  const geometry = useMemo(() => {
-    if (!asset.primitiveType) return null;
-    return makeGeometry(asset.primitiveType);
-  }, [asset.primitiveType]);
-
-  useEffect(() => {
-    return () => {
-      geometry?.dispose();
-    };
-  }, [geometry]);
-
-  if (!geometry) return null;
-
-  return (
-    <mesh onClick={onSelect} castShadow receiveShadow>
-      <primitive object={geometry} attach="geometry" />
-      <meshStandardMaterial color="#6da7ff" metalness={0.15} roughness={0.4} />
-    </mesh>
-  );
 }
