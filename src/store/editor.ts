@@ -29,7 +29,7 @@ export const DEFAULT_TRANSFORM: ObjectTransform = {
 
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 
-export type EditorMode = 'mesh' | 'collision' | 'gaussian';
+export type EditorMode = 'mesh' | 'collision' | 'gaussian' | 'edit' | 'combine';
 
 export type AxisLock = 'x' | 'y' | 'z' | null;
 
@@ -61,6 +61,28 @@ export interface AssetRef {
   transform: ObjectTransform;
   /** assigned collider marker (phase 4a) */
   collider: ColliderSpec | null;
+  /**
+   * Phase 3.2a: per-vertex position offsets (length = 3 * vertexCount).
+   * null = no edits; vertices are at their base geometry positions.
+   * Stored as plain array so zustand equality checks stay cheap and the
+   * data survives structuredClone for undo.
+   */
+  vertexOffsets: number[] | null;
+
+  /**
+   * Phase 3.2b/3.2c/5: snapshot of the asset's geometry buffers
+   * (positions + indices) captured BEFORE a destructive geometry
+   * mutation (hole-fill, make-face, boolean). The undo action restores
+   * this back into the live BufferGeometry, so undo actually rewinds
+   * vertex/index changes — not just the asset record.
+   *
+   * Only set on assets that have had geometry mutated. Missing/null
+   * means "geometry unchanged from its initial loaded state".
+   *
+   * Format: { positions: number[], indices: number[] | null }.
+   * Stored as plain arrays for zustand compatibility.
+   */
+  geometrySnapshot: { positions: number[]; indices: number[] | null } | null;
 }
 
 /**
@@ -122,6 +144,52 @@ interface EditorState {
    * If the transform didn't actually change, this is a no-op.
    */
   commitTransformDrag: (preDragAssets: AssetRef[]) => void;
+  /**
+   * Phase 3.2a — push a snapshot to history at the end of a vertex
+   * drag if any vertex offsets changed. Mirrors
+   * {@link commitTransformDrag} but for per-vertex edits.
+   */
+  commitVertexEdit: (preDragAssets: AssetRef[]) => void;
+  /** Phase 3.2a — update an asset's `vertexOffsets`. null clears edits. */
+  setVertexOffsets: (id: string, offsets: number[] | null) => void;
+  /**
+   * Phase 3.2b — replace the entire vertex buffer + index buffer for an
+   * asset. Used by hole-fill and make-face, which grow the geometry
+   * (new centroid vertices, new triangles). Caller passes the FULL
+   * new position array; we rebuild offsets to match its length with
+   * zeros for newly added vertices, preserving any pre-existing offsets
+   * for shared vertices.
+   *
+   * The BufferGeometry is mutated in place by the caller; this action
+   * just keeps the store's `vertexOffsets` in sync.
+   */
+  setVertexData: (id: string, positions: number[]) => void;
+
+  /**
+   * Phase 3.2c — commit a Make-Face operation to history. The actual
+   * geometry mutation is done by the caller (meshOps.makeFaceOnAsset);
+   * this just pushes a history entry so Cmd+Z rewinds to pre-face state.
+   */
+  commitMakeFace: (
+    id: string,
+    preFaceAssets: AssetRef[],
+    triangleIndices: number[],
+  ) => void;
+
+  /**
+   * Phase 3.2b/3.2c/5 — attach a snapshot of an asset's geometry
+   * buffers to its AssetRef so undo can restore them. Called by
+   * lib/meshOps BEFORE the geometry mutation, so undo (which restores
+   * the AssetRef) also has the pre-mutation geometry to write back.
+   *
+   * If a snapshot already exists, do NOT overwrite — the existing
+   * snapshot represents an earlier state the user hasn't rewound
+   * from yet.
+   */
+  setGeometrySnapshot: (
+    id: string,
+    snapshot: { positions: number[]; indices: number[] | null } | null,
+  ) => void;
   resetAssetTransform: (id: string) => void;
   setAssetCollider: (id: string, collider: ColliderSpec | null) => void;
 
@@ -191,11 +259,40 @@ interface EditorState {
   setAxisLock: (axis: AxisLock) => void;
   toggleAxisLock: (axis: Exclude<AxisLock, null>) => void;
 
+  /**
+   * Phase 3.2c — indices of vertices currently picked for face creation.
+   * The user shifts the selection by clicking dots (we add to the set,
+   * dedup, drop if already in it). `F` hotkey turns the selection
+   * into a triangle/quad fan. Cleared whenever the active asset changes
+   * or the user leaves edit mode.
+   */
+  selectedVertices: number[];
+  toggleSelectedVertex: (idx: number) => void;
+  clearSelectedVertices: () => void;
+
+  /**
+   * Phase 5 — second asset picked for boolean combine. Set when the
+   * user explicitly picks "Combine target" from the sidebar; we keep
+   * this separate from `activeAssetId` so the gizmo stays on whichever
+   * mesh the user is dragging, while the second pick accumulates here.
+   */
+  combineTargetId: string | null;
+  setCombineTarget: (id: string | null) => void;
+
   /** undo / redo (phase 3.1) */
   history: History;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
+
+  /**
+   * Phase 3.2b/3.2c/5 — incremented when undo/redo rewinds a geometry
+   * mutation. Components that own BufferGeometries listen to this
+   * counter and the `geometryUndoTargets` list, then write the
+   * `geometrySnapshot` arrays back into the live geometry.
+   */
+  geometryUndoNonce: number;
+  geometryUndoTargets: string[];
   canRedo: () => boolean;
   /**
    * Test-only escape hatch: clear both undo and redo stacks. Not used by
@@ -249,6 +346,20 @@ function transformsEqual(
   );
 }
 
+/** Shallow compare of two vertexOffset arrays. null vs null = equal. */
+function vertexOffsetsEqual(
+  a: number[] | null,
+  b: number[] | null,
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export const useEditor = create<EditorState>((set, get) => ({
   mode: 'mesh',
   setMode: (mode) =>
@@ -258,7 +369,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       // and any pending numeric edit would commit against the wrong
       // UI shape. UI disables mode tabs in play; this guard matches.
       if (s.playMode) return s;
-      return { mode };
+      return mode !== 'edit'
+        ? { mode, selectedVertices: [] }
+        : { mode };
     }),
 
   assets: [],
@@ -302,7 +415,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       };
     }),
 
-  setActiveAsset: (id) => set({ activeAssetId: id }),
+  setActiveAsset: (id) => set({ activeAssetId: id, selectedVertices: [] }),
 
   setAssetTransform: (id, transform) =>
     set((s) => {
@@ -357,6 +470,117 @@ export const useEditor = create<EditorState>((set, get) => ({
       };
     });
   },
+
+  /**
+   * Phase 3.2a — vertex edit. Snapshot `preDragAssets` once at the
+   * start of a vertex drag; on mouse-up, if any vertexOffset differs
+   * from the snapshot, push the snapshot onto the undo stack as a
+   * single history entry (mirrors the gizmo drag pattern).
+   */
+  commitVertexEdit: (preDragAssets: AssetRef[]) => {
+    const current = get().assets;
+    if (
+      preDragAssets.length === current.length &&
+      preDragAssets.every((pre, i) => {
+        const cur = current[i];
+        return (
+          cur &&
+          cur.id === pre.id &&
+          // Vertex edit cares about vertexOffsets, not transform.
+          // The transform might also have changed if the user moved
+          // the asset during edit mode — that's a separate history
+          // entry, captured by commitTransformDrag.
+          vertexOffsetsEqual(pre.vertexOffsets, cur.vertexOffsets)
+        );
+      })
+    ) {
+      return;
+    }
+    set((s) => {
+      const past = [...s.history.past, preDragAssets];
+      if (past.length > HISTORY_LIMIT) past.shift();
+      return { history: { past, future: [] } };
+    });
+  },
+
+  /**
+   * Phase 3.2a — update an asset's vertexOffsets in place. Length
+   * must be 3 * vertexCount; we don't validate here because the
+   * EditableMesh component is the sole caller and matches the count
+   * to the underlying BufferGeometry.
+   */
+  setVertexOffsets: (id: string, offsets: number[] | null) =>
+    set((s) => ({
+      assets: s.assets.map((a) => (a.id === id ? { ...a, vertexOffsets: offsets } : a)),
+    })),
+
+  /**
+   * Phase 3.2b — synchronize `vertexOffsets` after a hole-fill or
+   * make-face operation has grown the geometry. New vertices added by
+   * the operation start at zero offset; existing vertex offsets are
+   * preserved at their old indices.
+   *
+   * `positions` is the new full position array (length 3 * newCount).
+   * We rebuild offsets = zeros for all new vertices + preserve any
+   * pre-existing offsets for vertices whose indices are unchanged.
+   */
+  setVertexData: (id: string, positions: number[]) =>
+    set((s) => ({
+      assets: s.assets.map((a) => {
+        if (a.id !== id) return a;
+        const oldOffsets = a.vertexOffsets ?? [];
+        const oldCount = oldOffsets.length / 3;
+        const newCount = positions.length / 3;
+        const merged: number[] = new Array(newCount * 3).fill(0);
+        for (let i = 0; i < Math.min(oldCount, newCount) * 3; i++) {
+          merged[i] = oldOffsets[i] ?? 0;
+        }
+        return { ...a, vertexOffsets: merged };
+      }),
+    })),
+
+  /**
+   * Phase 3.2c — create a face (triangle or quad fan) from the user's
+   * current vertex selection. Pre-snapshots assets to the history stack
+   * so undo restores pre-face geometry + clears the selection.
+   *
+   * The actual geometry mutation is done by the caller
+   * (`makeFaceOnAsset` in lib/meshOps) BEFORE calling this. We just
+   * push the snapshot so Cmd+Z can rewind.
+   *
+   * `triangleIndices` is the new triangles' vertex indices as a flat
+   * array — we use it to detect whether anything actually changed
+   * (zero-length array = nothing to do).
+   */
+  commitMakeFace: (_id: string, preFaceAssets: AssetRef[], triangleIndices: number[]) =>
+    set((s) => {
+      if (triangleIndices.length === 0) return s;
+      return {
+        history: snapshotHistory(s.history, preFaceAssets),
+        selectedVertices: [],
+        refitRequestNonce: s.refitRequestNonce + 1,
+      };
+    }),
+
+  /**
+   * Set an asset's geometrySnapshot. Pass null to clear it (e.g. when
+   * the asset is removed or its geometry is replaced wholesale).
+   *
+   * Internal note: this is called by meshOps immediately before a
+   * destructive mutation. If a snapshot already exists, we leave it
+   * alone — the user hasn't rewound past the earlier mutation yet,
+   * so the existing snapshot is still the correct undo target.
+   */
+  setGeometrySnapshot: (id, snapshot) =>
+    set((s) => ({
+      assets: s.assets.map((a) => {
+        if (a.id !== id) return a;
+        if (snapshot === null) return { ...a, geometrySnapshot: null };
+        // Only set if not already set.
+        if (a.geometrySnapshot) return a;
+        return { ...a, geometrySnapshot: snapshot };
+      }),
+    })),
 
   resetAssetTransform: (id) =>
     set((s) => ({
@@ -474,6 +698,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       loadedAt: Date.now(),
       transform: { ...DEFAULT_TRANSFORM },
       collider: null,
+      vertexOffsets: null,
+      geometrySnapshot: null,
     };
     set((s) => {
       // Phase 4d safety net: same as addAsset — primitives add an
@@ -501,6 +727,21 @@ export const useEditor = create<EditorState>((set, get) => ({
   toggleAxisLock: (axis) =>
     set((s) => ({ axisLock: s.axisLock === axis ? null : axis })),
 
+  // Phase 3.2c — vertex multi-select for face creation.
+  selectedVertices: [],
+  toggleSelectedVertex: (idx) =>
+    set((s) => {
+      const next = s.selectedVertices.includes(idx)
+        ? s.selectedVertices.filter((v) => v !== idx)
+        : [...s.selectedVertices, idx];
+      return { selectedVertices: next };
+    }),
+  clearSelectedVertices: () => set({ selectedVertices: [] }),
+
+  // Phase 5 — boolean target.
+  combineTargetId: null,
+  setCombineTarget: (id) => set({ combineTargetId: id }),
+
   undo: () => {
     const { history, assets, activeAssetId, playMode } = get();
     if (history.past.length === 0) return;
@@ -512,6 +753,20 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (playMode) return;
     const prev = history.past[history.past.length - 1];
     const nextPast = history.past.slice(0, -1);
+
+    // Phase 3.2b/3.2c/5 — restore geometry buffers for any asset whose
+    // geometrySnapshot changed between `prev` and current `assets`.
+    // The snapshot is the pre-mutation state; restoring it rewinds
+    // hole-fill / make-face / boolean.
+    const changedAssetIds: string[] = [];
+    for (const cur of assets) {
+      const pre = prev.find((a) => a.id === cur.id);
+      if (!pre) continue;
+      if (pre.geometrySnapshot !== cur.geometrySnapshot) {
+        changedAssetIds.push(cur.id);
+      }
+    }
+
     set({
       assets: prev,
       history: {
@@ -521,6 +776,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       activeAssetId: prev.find((a) => a.id === activeAssetId)
         ? activeAssetId
         : (prev[0]?.id ?? null),
+      // Notify the renderer layer to restore geometry buffers.
+      // The MeshGeometryBridge (or a small consumer) listens to this
+      // counter and writes the buffers back into the live BufferGeometry.
+      geometryUndoNonce: get().geometryUndoNonce + 1,
+      geometryUndoTargets: changedAssetIds,
     });
   },
 
@@ -531,6 +791,18 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (playMode) return;
     const next = history.future[0];
     const rest = history.future.slice(1);
+
+    // Phase 3.2b/3.2c/5 — see undo() above. Apply same geometry-restore
+    // logic in reverse.
+    const changedAssetIds: string[] = [];
+    for (const cur of assets) {
+      const post = next.find((a) => a.id === cur.id);
+      if (!post) continue;
+      if (post.geometrySnapshot !== cur.geometrySnapshot) {
+        changedAssetIds.push(cur.id);
+      }
+    }
+
     set({
       assets: next,
       history: {
@@ -540,11 +812,17 @@ export const useEditor = create<EditorState>((set, get) => ({
       activeAssetId: next.find((a) => a.id === activeAssetId)
         ? activeAssetId
         : (next[0]?.id ?? null),
+      geometryUndoNonce: get().geometryUndoNonce + 1,
+      geometryUndoTargets: changedAssetIds,
     });
   },
 
   canUndo: () => get().history.past.length > 0,
   canRedo: () => get().history.future.length > 0,
+
+  // Phase 3.2 — geometry undo hooks.
+  geometryUndoNonce: 0,
+  geometryUndoTargets: [],
 
   resetHistoryForTest: () => set({ history: { past: [], future: [] } }),
 

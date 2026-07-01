@@ -1,6 +1,7 @@
 import { useEditor, type TransformMode, type EditorMode, type AxisLock } from '@/store/editor';
 import { PRIMITIVE_TYPES, primitiveLabel, COLLIDER_TYPES, colliderLabel, DEFAULT_COLLIDER } from '@/lib/formats';
 import { ColliderEditor } from './ColliderEditor';
+import { fillHolesOnAsset, resetVertexEdits, makeFaceOnAsset, booleanOnAssets } from '@/lib/meshOps';
 
 const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
   mesh: {
@@ -22,6 +23,20 @@ const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
     lines: [
       'Upload a .splat / .ply / .spz to begin.',
       'Phase 5 will add box-select delete, brush edit, transform, recolor.',
+    ],
+  },
+  edit: {
+    title: 'Edit mode',
+    lines: [
+      'Vertex-level editing — click a vertex to grab, drag to move.',
+      'Use the toolbar below: Reset / Fill holes / Make face / Combine.',
+    ],
+  },
+  combine: {
+    title: 'Combine mode',
+    lines: [
+      'Boolean CSG — union / subtract / intersect two selected assets.',
+      'Select two assets, then pick an operation. The result lands on the first asset.',
     ],
   },
 };
@@ -219,6 +234,177 @@ export function Sidebar() {
                 Select an asset below — or add a primitive — to enable gizmo controls.
               </p>
             )}
+        </>
+      )}
+
+      {mode === 'edit' && (
+        <>
+          <h3 className="section-title">Edit</h3>
+          {activeAsset ? (
+            <div className="edit-grid">
+              <button
+                className="edit-btn"
+                onClick={() => {
+                  const preAssets = useEditor.getState().assets;
+                  const filled = fillHolesOnAsset(activeAsset.id);
+                  if (filled > 0) {
+                    // Push a history snapshot so undo rewinds both
+                    // the asset record (vertexOffsets) AND the
+                    // geometrySnapshot (applied by GeometryUndoBridge).
+                    useEditor.getState().commitMakeFace(
+                      activeAsset.id,
+                      preAssets,
+                      [filled],
+                    );
+                  }
+                }}
+                title="Detect boundary loops and triangulate-fill each one with a centroid fan"
+                disabled={playMode}
+              >
+                🔺 Fill holes
+              </button>
+              <button
+                className="edit-btn"
+                onClick={() => {
+                  const sel = useEditor.getState().selectedVertices;
+                  const preAssets = useEditor.getState().assets;
+                  const newTris = makeFaceOnAsset(activeAsset.id, sel);
+                  useEditor
+                    .getState()
+                    .commitMakeFace(activeAsset.id, preAssets, newTris);
+                }}
+                disabled={playMode || useEditor.getState().selectedVertices.length < 3}
+                title="Fan-triangulate the selected vertices into a face (or press F)"
+              >
+                ◧ Make face ({useEditor((s) => s.selectedVertices.length)})
+              </button>
+              <button
+                className="edit-btn"
+                onClick={() => resetVertexEdits(activeAsset.id)}
+                title="Discard all per-vertex offsets"
+                disabled={playMode}
+              >
+                ⟲ Reset edits
+              </button>
+              <p className="hint">
+                Click a yellow dot to select a vertex. Drag or use arrow
+                keys (Shift = 0.5) to move. Click multiple vertices then
+                press <kbd>F</kbd> to make a face. <kbd>X</kbd>/<kbd>Y</kbd>/
+                <kbd>Z</kbd> lock the drag axis.
+              </p>
+            </div>
+          ) : (
+            <p className="empty section-empty">
+              Select an asset to enable edit tools.
+            </p>
+          )}
+        </>
+      )}
+
+      {mode === 'combine' && (
+        <>
+          <h3 className="section-title">Combine</h3>
+          {assets.length < 2 ? (
+            <p className="empty section-empty">
+              Add at least two assets to combine.
+            </p>
+          ) : (
+            <>
+              <p className="hint">
+                Pick a primary asset (left), then a target (right), then
+                choose an operation. Result lands on the primary asset.
+              </p>
+              <div className="combine-pickers">
+                <label className="combine-row">
+                  <span>Primary</span>
+                  <select
+                    value={activeAsset?.id ?? ''}
+                    onChange={(e) => setActiveAsset(e.target.value || null)}
+                    disabled={playMode}
+                  >
+                    <option value="">— pick —</option>
+                    {assets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="combine-row">
+                  <span>Target</span>
+                  <select
+                    value={useEditor((s) => s.combineTargetId) ?? ''}
+                    onChange={(e) =>
+                      useEditor.getState().setCombineTarget(e.target.value || null)
+                    }
+                    disabled={playMode}
+                  >
+                    <option value="">— pick —</option>
+                    {assets
+                      .filter((a) => a.id !== activeAsset?.id)
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              <div className="combine-ops">
+                <button
+                  className="edit-btn"
+                  onClick={() => {
+                    const a = activeAsset;
+                    const b = useEditor.getState().combineTargetId;
+                    if (!a || !b) return;
+                    const preAssets = useEditor.getState().assets;
+                    const n = booleanOnAssets(a.id, b, 'union');
+                    if (n > 0) {
+                      useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
+                    }
+                  }}
+                  disabled={playMode || !activeAsset || !useEditor((s) => s.combineTargetId)}
+                  title="Add target to primary"
+                >
+                  ∪ Union
+                </button>
+                <button
+                  className="edit-btn"
+                  onClick={() => {
+                    const a = activeAsset;
+                    const b = useEditor.getState().combineTargetId;
+                    if (!a || !b) return;
+                    const preAssets = useEditor.getState().assets;
+                    const n = booleanOnAssets(a.id, b, 'subtract');
+                    if (n > 0) {
+                      useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
+                    }
+                  }}
+                  disabled={playMode || !activeAsset || !useEditor((s) => s.combineTargetId)}
+                  title="Cut target out of primary"
+                >
+                  − Subtract
+                </button>
+                <button
+                  className="edit-btn"
+                  onClick={() => {
+                    const a = activeAsset;
+                    const b = useEditor.getState().combineTargetId;
+                    if (!a || !b) return;
+                    const preAssets = useEditor.getState().assets;
+                    const n = booleanOnAssets(a.id, b, 'intersect');
+                    if (n > 0) {
+                      useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
+                    }
+                  }}
+                  disabled={playMode || !activeAsset || !useEditor((s) => s.combineTargetId)}
+                  title="Keep only the overlap"
+                >
+                  ∩ Intersect
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
 

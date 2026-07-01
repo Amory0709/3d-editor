@@ -1,11 +1,17 @@
 import { forwardRef, useImperativeHandle, useRef, useLayoutEffect } from 'react';
 import type { Group } from 'three';
 import type { AssetRef } from '@/store/editor';
+import { useEditor } from '@/store/editor';
 import { MeshRenderer } from './MeshRenderer';
+import { EditableMesh } from './EditableMesh';
 import { ColliderMarker } from './ColliderMarker';
 
 interface Props {
   asset: AssetRef;
+  /** Click handler — wires mesh click to set this asset as active. */
+  onSelect?: () => void;
+  /** When true, render EditableMesh instead of MeshRenderer. */
+  editable?: boolean;
 }
 
 /**
@@ -34,8 +40,10 @@ interface Props {
  * next paint, so the very first frame is correct.
  */
 export const TransformableAsset = forwardRef<Group, Props>(
-  ({ asset }, ref) => {
+  ({ asset, onSelect, editable }, ref) => {
     const groupRef = useRef<Group>(null);
+    const mode = useEditor((s) => s.mode);
+    const isEditMode = mode === 'edit';
     useImperativeHandle(ref, () => groupRef.current as Group);
 
     useLayoutEffect(() => {
@@ -49,13 +57,22 @@ export const TransformableAsset = forwardRef<Group, Props>(
       );
     });
 
+    const useEditable = editable === true && isEditMode;
+
     return (
       <group
         ref={groupRef}
         position={asset.transform.position}
         scale={asset.transform.scale}
       >
-        <MeshRenderer asset={asset} />
+        {useEditable ? (
+          <EditableMesh asset={asset} onSelect={onSelect ? () => onSelect() : undefined} />
+        ) : (
+          <MeshRenderer
+            asset={asset}
+            onSelect={onSelect ? () => onSelect() : undefined}
+          />
+        )}
         {asset.collider && <ColliderMarker spec={asset.collider} />}
       </group>
     );

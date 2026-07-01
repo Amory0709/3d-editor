@@ -8,17 +8,19 @@ import { useEditor } from '@/store/editor';
 import { disposeObject3D } from '@/lib/dispose';
 import { PrimitiveRenderer } from './PrimitiveRenderer';
 
-function GLTFMesh({ asset }: { asset: AssetRef }) {
+function GLTFMesh({ asset, onSelect }: { asset: AssetRef; onSelect?: () => void }) {
   const gltf = useGLTF(asset.url!);
   // Free GPU buffers when the component unmounts (asset removed / switched).
   useEffect(() => {
     return () => disposeObject3D(gltf.scene);
   }, [gltf.scene]);
   // Transform is applied by the TransformableAsset wrapper, not here.
-  return <primitive object={gltf.scene} />;
+  // Stop propagation so clicking a mesh only selects this asset, not
+  // the entire scene (the Bounds canvas also receives clicks).
+  return <primitive object={gltf.scene} onClick={onSelect} />;
 }
 
-function OBJMesh({ asset }: { asset: AssetRef }) {
+function OBJMesh({ asset, onSelect }: { asset: AssetRef; onSelect?: () => void }) {
   const obj = useLoader(OBJLoader, asset.url!);
 
   // OBJLoader yields meshes with no material assigned — give them a neutral
@@ -41,7 +43,7 @@ function OBJMesh({ asset }: { asset: AssetRef }) {
   }, [obj]);
 
   // Transform is applied by the TransformableAsset wrapper, not here.
-  return <primitive object={obj} />;
+  return <primitive object={obj} onClick={onSelect} />;
 }
 
 /**
@@ -54,11 +56,8 @@ function OBJMesh({ asset }: { asset: AssetRef }) {
  * Transform is NOT applied here — the wrapping <TransformableAsset>
  * applies it, so the same mesh can be controlled by TransformControls
  * without compositing transforms.
- *
- * TODO(phase 3.1): <primitive object={scene}> bypasses R3F reconciliation;
- * vertex-level picking will need to traverse and recreate meshes in JSX.
  */
-export function MeshRenderer({ asset }: { asset: AssetRef }) {
+export function MeshRenderer({ asset, onSelect }: { asset: AssetRef; onSelect?: () => void }) {
   const setLoading = useEditor((s) => s.setLoading);
 
   // Clear the global `loading` flag only once this renderer has actually
@@ -70,13 +69,13 @@ export function MeshRenderer({ asset }: { asset: AssetRef }) {
   }, [asset.id, setLoading]);
 
   if (asset.source === 'primitive') {
-    return <PrimitiveRenderer asset={asset} />;
+    return <PrimitiveRenderer asset={asset} onSelect={onSelect} />;
   }
   if (asset.format === 'glb' || asset.format === 'gltf') {
-    return <GLTFMesh asset={asset} />;
+    return <GLTFMesh asset={asset} onSelect={onSelect} />;
   }
   if (asset.format === 'obj') {
-    return <OBJMesh asset={asset} />;
+    return <OBJMesh asset={asset} onSelect={onSelect} />;
   }
   return null;
 }

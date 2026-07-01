@@ -17,6 +17,7 @@ import { DemoCube } from './DemoCube';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PhysicsTicker } from './PhysicsTicker';
 import { useEditorShortcuts } from '@/lib/keyboard';
+import { GeometryUndoBridge } from './MeshGeometryBridge';
 
 function LoadingHint() {
   return (
@@ -30,16 +31,18 @@ function LoadingHint() {
 }
 
 function Scene({ refitNonce }: { refitNonce: number }) {
+  const assets = useEditor((s) => s.assets);
   const activeAsset = useEditor((s) =>
     s.activeAssetId ? s.assets.find((a) => a.id === s.activeAssetId) ?? null : null,
   );
+  const setActiveAsset = useEditor((s) => s.setActiveAsset);
   const transformMode = useEditor((s) => s.transformMode);
   const axisLock = useEditor((s) => s.axisLock);
   const playMode = useEditor((s) => s.playMode);
   const setAssetTransform = useEditor((s) => s.setAssetTransform);
   const setAssetTransformLive = useEditor((s) => s.setAssetTransformLive);
   const commitTransformDrag = useEditor((s) => s.commitTransformDrag);
-  const showDemo = !activeAsset;
+  const showDemo = assets.length === 0;
 
   // Ref to the controlled group so TransformControls can attach to it.
   // We use a callback ref that triggers a state update so TransformControls
@@ -79,6 +82,8 @@ function Scene({ refitNonce }: { refitNonce: number }) {
       <directionalLight position={[5, 8, 5]} intensity={1} />
       <directionalLight position={[-3, 2, -3]} intensity={0.3} />
 
+      <GeometryUndoBridge />
+
       <Grid
         args={[20, 20]}
         cellSize={0.5}
@@ -98,7 +103,24 @@ function Scene({ refitNonce }: { refitNonce: number }) {
           {showDemo ? (
             <DemoCube />
           ) : (
-            <TransformableAsset asset={activeAsset} ref={setGroupObj} />
+            <>
+              {/*
+                Render ALL assets, not just the active one. The
+                click-to-select handler changes activeAssetId so the
+                gizmo follows the user's pick. Without this, only the
+                selected asset is in the scene at any time — every
+                other one is invisible despite being in the store.
+              */}
+              {assets.map((a) => (
+                <TransformableAsset
+                  key={a.id}
+                  asset={a}
+                  onSelect={() => setActiveAsset(a.id)}
+                  ref={a.id === activeAsset?.id ? setGroupObj : undefined}
+                  editable={a.id === activeAsset?.id}
+                />
+              ))}
+            </>
           )}
         </Bounds>
       </Suspense>

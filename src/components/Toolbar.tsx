@@ -7,6 +7,8 @@ const MODES: { id: EditorMode; label: string }[] = [
   { id: 'mesh', label: 'Mesh' },
   { id: 'collision', label: 'Collision' },
   { id: 'gaussian', label: 'Gaussian' },
+  { id: 'edit', label: 'Edit' },
+  { id: 'combine', label: 'Combine' },
 ];
 
 export function Toolbar() {

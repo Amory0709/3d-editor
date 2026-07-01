@@ -47,6 +47,8 @@ export async function handleFiles(files: FileList | null): Promise<void> {
       loadedAt: Date.now(),
       transform: { ...DEFAULT_TRANSFORM },
       collider: null,
+      vertexOffsets: null,
+      geometrySnapshot: null,
     });
     added++;
   }
