@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useFrame, useLoader } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useFrame, useLoader, useThree } from '@react-three/fiber';
+import { Edges, useGLTF } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import type { BufferGeometry, Object3D } from 'three';
+import type { BufferGeometry, Camera, Object3D, PerspectiveCamera } from 'three';
+import { Vector3 } from 'three';
 import type { AssetRef } from '@/store/editor';
 import type { PrimitiveType } from '@/lib/formats';
 import { useEditor } from '@/store/editor';
@@ -206,6 +207,11 @@ function EditableMeshBody({
       <mesh onClick={onSelect}>
         <primitive object={geometry} attach="geometry" />
         <meshStandardMaterial color="#6da7ff" metalness={0.15} roughness={0.4} />
+        {/* Wireframe overlay so the user can see the mesh structure while
+            picking vertices. threshold=1 keeps all hard edges visible
+            (cube → 12 edges). Color is a slightly desaturated white that
+            reads on top of the light-blue material without overpowering. */}
+        <Edges color="#e8f1ff" threshold={1} />
       </mesh>
       {isEditMode && vertexCount > 0 && (
         <VertexOverlay
@@ -264,10 +270,23 @@ function VertexOverlay({
     vertexIdx: number;
     startScreen: { x: number; y: number };
     startVert: [number, number, number];
+    /** World units per screen pixel at drag start — derived from the
+     *  camera-to-vertex distance so 1px of cursor movement ≈ 1px worth
+     *  of screen-plane movement in world space. See onPointerDown. */
+    worldPerPixel: number;
+    /** Camera right/up basis in world space at drag start, used to
+     *  project the screen delta onto world axes (incl. axis-lock). */
+    cameraRight: Vector3;
+    cameraUp: Vector3;
     preDragAssets: AssetRef[];
   } | null>(null);
   const commitVertexEdit = useEditor((s) => s.commitVertexEdit);
   const setVertexOffsets = useEditor((s) => s.setVertexOffsets);
+
+  // R3F provides camera + viewport size for the camera-distance-aware
+  // drag scale. Captured via useThree so we don't recompute on every
+  // pointermove (size.height changes only on window resize).
+  const { camera, size } = useThree();
 
   // Arrow key nudging — applies to ALL selected vertices.
   useEffect(() => {
@@ -350,6 +369,71 @@ function VertexOverlay({
     commitVertexEdit,
   ]);
 
+  // Robustness: catch ⌘Z (or ⌘⇧Z) mid-drag. Without this, undo restores
+  // the asset to pre-drag state, but our `dragRef.current` still holds
+  // the OLD startScreen/startVert. The next pointermove would then
+  // compute delta from a stale origin and the vertex would "teleport"
+  // — looking like undo is broken even though the store is correct.
+  // Fix: subscribe to history changes; if the past/future stack mutates
+  // mid-drag, drop the in-progress drag silently. We do NOT commit
+  // again — undo already restored pre-drag state and a second push would
+  // just create a redundant history entry.
+  useEffect(() => {
+    let prevPastLen = useEditor.getState().history.past.length;
+    let prevFutureLen = useEditor.getState().history.future.length;
+    const unsub = useEditor.subscribe((state) => {
+      const pastLen = state.history.past.length;
+      const futureLen = state.history.future.length;
+      if (pastLen !== prevPastLen || futureLen !== prevFutureLen) {
+        if (dragRef.current) {
+          dragRef.current = null;
+        }
+      }
+      prevPastLen = pastLen;
+      prevFutureLen = futureLen;
+    });
+    return unsub;
+  }, []);
+
+  // Robustness: pointer that leaves the canvas (off the dot, off the
+  // viewport, into a sidebar input) never fires pointerup on the dot,
+  // so dragRef.current would stay armed forever — corrupting every
+  // subsequent drag. Fix: window-level pointerup + pointercancel
+  // listeners that commit whatever was in flight. The local
+  // onPointerUp is a no-op when dragRef is already null, so double-fire
+  // is harmless.
+  useEffect(() => {
+    function onWindowPointerUp() {
+      if (dragRef.current) {
+        const pre = dragRef.current.preDragAssets;
+        dragRef.current = null;
+        commitVertexEdit(pre);
+      }
+    }
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerUp);
+    };
+  }, [commitVertexEdit]);
+
+  // Robustness: when VertexOverlay unmounts (mode switch out of edit,
+  // asset deletion, route change) with a drag in flight, commit the
+  // in-progress edit so undo can still rewind it. Without this, the
+  // user could drag a vertex, click "Mesh" tab, and lose the ability
+  // to undo that edit (the live BufferGeometry shows the offset, but
+  // history never recorded it).
+  useEffect(() => {
+    return () => {
+      if (dragRef.current) {
+        const pre = dragRef.current.preDragAssets;
+        dragRef.current = null;
+        commitVertexEdit(pre);
+      }
+    };
+  }, [commitVertexEdit]);
+
   // Early return goes AFTER all hooks.
   const positions = readPositions(geometry);
   if (!positions) return null;
@@ -369,32 +453,79 @@ function VertexOverlay({
             onPointerDown={(e) => {
               e.stopPropagation();
               onToggle(i);
+              // Compute screen→world scale from camera distance to the
+              // vertex so the drag feels 1:1 with the cursor no matter
+              // how zoomed in/out the viewport is.
+              const vertexWorld = new Vector3();
+              e.object.getWorldPosition(vertexWorld);
+              const d = camera.position.distanceTo(vertexWorld);
+              // camera from useThree is typed as Camera; only PerspectiveCamera
+              // has `fov`. We use a PerspectiveCamera in the Canvas (camera={{
+              // position: [3,3,5], fov: 45, ... }} in Viewport.tsx), so this
+              // cast is safe but we still narrow via `isPerspectiveCamera` so
+              // tsc is happy.
+              const persp = camera as PerspectiveCamera;
+              const fovRad = (persp.fov * Math.PI) / 180;
+              // For a perspective camera: at distance d, the visible
+              // height spans 2 * d * tan(fov/2); worldPerPixel = visible
+              // height / viewport height (in CSS px).
+              const worldPerPixel =
+                (d * Math.tan(fovRad / 2) * 2) / Math.max(1, size.height);
+              // Camera basis in world space: column 0 = right, column 1 = up.
+              // We capture these once at drag start so a mid-drag camera
+              // orbit doesn't make the vertex dance.
+              const cameraRight = new Vector3().setFromMatrixColumn(
+                (camera as Camera).matrixWorld,
+                0,
+              );
+              const cameraUp = new Vector3().setFromMatrixColumn(
+                (camera as Camera).matrixWorld,
+                1,
+              );
               dragRef.current = {
                 vertexIdx: i,
                 startScreen: { x: e.clientX, y: e.clientY },
                 startVert: [x, y, z],
+                worldPerPixel,
+                cameraRight,
+                cameraUp,
                 preDragAssets: useEditor.getState().assets,
               };
               (e.target as Element)?.setPointerCapture?.(e.pointerId);
             }}
             onPointerMove={(e) => {
               if (!dragRef.current || dragRef.current.vertexIdx !== i) return;
-              const dxPx = e.clientX - dragRef.current.startScreen.x;
-              const dyPx = e.clientY - dragRef.current.startScreen.y;
-              const dxWorld = dxPx * 0.01;
-              const dyWorld = -dyPx * 0.01;
-              let dx = dxWorld;
-              let dy = dyWorld;
+              const drag = dragRef.current;
+              const dxPx = e.clientX - drag.startScreen.x;
+              const dyPx = e.clientY - drag.startScreen.y;
+              const dxWorld_units = dxPx * drag.worldPerPixel;
+              const dyWorld_units = -dyPx * drag.worldPerPixel;
+              // Project screen-space delta onto the world axis using the
+              // camera basis captured at drag start. This makes the drag
+              // feel 1:1 with the cursor regardless of camera distance
+              // (zoom) or camera angle (orbit).
+              const r = drag.cameraRight;
+              const u = drag.cameraUp;
+              // World-space delta vector (no axis lock applied yet):
+              const worldDx = r.x * dxWorld_units + u.x * dyWorld_units;
+              const worldDy = r.y * dxWorld_units + u.y * dyWorld_units;
+              const worldDz = r.z * dxWorld_units + u.z * dyWorld_units;
+              // With axis lock, keep only the component along the locked
+              // world axis. e.g. lock X means only motion projected onto
+              // world X (not screen X) counts.
+              let dx = 0;
+              let dy = 0;
               let dz = 0;
-              if (axisLock === 'x') {
-                dy = 0;
-                dz = 0;
+              if (axisLock === null) {
+                dx = worldDx;
+                dy = worldDy;
+                dz = worldDz;
+              } else if (axisLock === 'x') {
+                dx = worldDx;
               } else if (axisLock === 'y') {
-                dx = 0;
-                dz = 0;
+                dy = worldDy;
               } else if (axisLock === 'z') {
-                dx = 0;
-                dy = 0;
+                dz = worldDz;
               }
               const positions = readPositions(geometry);
               if (!positions) return;
