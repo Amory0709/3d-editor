@@ -11,6 +11,10 @@ Browser-based editor for mesh and gaussian-splat 3D assets.
 | 3 | done | Transform gizmos (W/E/R/F/Esc) + primitives (cube/sphere/cylinder); vertex edit + merge deferred |
 | 3.1 | done | Editor usability: undo/redo (⌘Z / ⌘⇧Z / Ctrl+Y), numeric transform inspector, axis lock (X/Y/Z), reset-to-identity, larger gizmo |
 | 3.2 | done | Drag commit-on-release (1 history entry per gizmo drag, was ~60/frame) |
+| 3.2a | done | Vertex-level editing: yellow dots overlay, click to select, drag or arrow keys to move (Shift = 0.5), per-vertex offsets stored on AssetRef, undo restores |
+| 3.2b | done | Auto hole-fill: detect boundary loops → centroid-fan triangulation, weld-then-fill handles three's no-sharing box vertices |
+| 3.2c | done | Manual make-face: click multiple vertices, press `F` (or use the sidebar button) to fan-triangulate them into a new face |
+| 5 | done | Boolean CSG: union / subtract / intersect two assets (three-bvh-csg). New "Combine" mode. Per-vertex edits are NOT included in the brush; they live on the base shape, so CSG works on the original geometry |
 | 4a | done | Visual collider markers (box/sphere/capsule/cylinder) + camera refit-on-add + sidebar empty state |
 | 4b | done | cannon-es physics world mirrors the collider graph (one-way editor → physics sync, static bodies, capsule = compound, scale baked into shape) — see [Known limitations](#phase-4b--known-limitations) |
 | 4c | done | Numeric collider editor: halfExtents / radius / height inputs with blur-clamp + blur-commit (one history entry per focus session) |
@@ -146,7 +150,7 @@ scripts/
 - Phase 3.1 follow-up #1: camera fit on remove-all (currently first-fit doesn't reset on full clear)
 - Phase 3.1 follow-up #2: OBJ upload doesn't auto-fit (intentional camera-stability, but confusing UX)
 - Phase 3.1 follow-up #3: ESC clears asset but sidebar Transform section disappears mid-mode
-- Vertex edit + merge (phase 3.2): transform layer in place, vertex picking + scene merge not done
+- Vertex edit + merge (phase 3.2): transform layer in place, vertex picking + scene merge not done — **shipped 3.2a/b/c** (vertex edit + hole-fill + make-face), Phase 5 (boolean CSG)
 - `<primitive object={scene}>` should be replaced with `drei <Gltf>` or per-mesh JSX before phase 4b physics
 - `useGLTF` cache eviction when an asset is removed mid-load (current leak is bounded by the loader's promise, not by the GPU)
 - Phase 4b: real physics integration (cannon / rapier / custom), auto-convex / auto-trimesh from mesh, custom collider dimensions (per-collider halfExtents / radius / height) — **shipped 4b** covers the engine + dimensions; numeric UI for custom dimensions + play mode + collision events are 4c
