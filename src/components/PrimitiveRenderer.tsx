@@ -10,7 +10,7 @@ interface Props {
 }
 
 /** Build a BufferGeometry for a given primitive type. */
-function makeGeometry(type: PrimitiveType) {
+export function makeGeometry(type: PrimitiveType) {
   switch (type) {
     case 'cube':
       return new BoxGeometry(1, 1, 1);

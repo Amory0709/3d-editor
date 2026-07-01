@@ -2,17 +2,14 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import {
-  BufferGeometry,
-  BoxGeometry,
-  CylinderGeometry,
-  SphereGeometry,
-} from 'three';
+import type { BufferGeometry, Object3D } from 'three';
 import type { AssetRef } from '@/store/editor';
+import type { PrimitiveType } from '@/lib/formats';
 import { useEditor } from '@/store/editor';
 import { applyOffsets, readPositions } from '@/lib/meshEdit';
 import { makeFaceOnAsset } from '@/lib/meshOps';
 import { GeometryRegistrar } from './MeshGeometryBridge';
+import { makeGeometry } from './PrimitiveRenderer';
 
 interface Props {
   asset: AssetRef;
@@ -30,8 +27,123 @@ interface Props {
  * Used as a drop-in replacement for the inner mesh of `<MeshRenderer>`
  * when in Edit mode. Does NOT handle the transform wrapper or the
  * collider marker -- those live in TransformableAsset.
+ *
+ * Dispatch design (rules-of-hooks fix):
+ *   `useAssetGeometry` previously called different numbers of hooks
+ *   depending on asset.source — 1 (useMemo) for primitives, 2
+ *   (useGLTF + useMemo) for glb/gltf, 2 (useLoader + useMemo) for
+ *   obj. React requires the same hook count per render, and even
+ *   though asset.type is stable for a given EditableMesh instance,
+ *   the useFrame hook interleaving + React Strict Mode + Suspense
+ *   boundaries made this throw #310 in production.
+ *
+ *   The fix is to keep `EditableMesh` itself hook-free and dispatch
+ *   to one of three per-type child components (`PrimitiveEditable`,
+ *   `GLBEditable`, `OBJEditable`), each with its own stable hook
+ *   count. Each child then renders the shared `EditableMeshBody`,
+ *   which holds the rest of the logic and gets `geometry` as a prop.
  */
 export function EditableMesh({ asset, onSelect }: Props) {
+  if (asset.source === 'primitive' && asset.primitiveType) {
+    return (
+      <PrimitiveEditable
+        asset={asset}
+        onSelect={onSelect}
+        primitiveType={asset.primitiveType}
+      />
+    );
+  }
+  if (asset.format === 'glb' || asset.format === 'gltf') {
+    if (!asset.url) return null;
+    return (
+      <GLBEditable asset={asset} onSelect={onSelect} url={asset.url} />
+    );
+  }
+  if (asset.format === 'obj') {
+    if (!asset.url) return null;
+    return (
+      <OBJEditable asset={asset} onSelect={onSelect} url={asset.url} />
+    );
+  }
+  return null;
+}
+
+/** Per-type dispatch target for primitive assets. */
+function PrimitiveEditable({
+  asset,
+  onSelect,
+  primitiveType,
+}: {
+  asset: AssetRef;
+  onSelect: Props['onSelect'];
+  primitiveType: PrimitiveType;
+}) {
+  const geometry = useMemo(
+    () => makeGeometry(primitiveType),
+    [primitiveType],
+  );
+  return <EditableMeshBody asset={asset} onSelect={onSelect} geometry={geometry} />;
+}
+
+/** Per-type dispatch target for glTF / GLB assets. */
+function GLBEditable({
+  asset,
+  onSelect,
+  url,
+}: {
+  asset: AssetRef;
+  onSelect: Props['onSelect'];
+  url: string;
+}) {
+  const gltf = useGLTF(url);
+  const geometry = useMemo(() => firstMeshGeometry(gltf?.scene), [gltf]);
+  return <EditableMeshBody asset={asset} onSelect={onSelect} geometry={geometry} />;
+}
+
+/** Per-type dispatch target for OBJ assets. */
+function OBJEditable({
+  asset,
+  onSelect,
+  url,
+}: {
+  asset: AssetRef;
+  onSelect: Props['onSelect'];
+  url: string;
+}) {
+  const obj = useLoader(OBJLoader, url);
+  const geometry = useMemo(() => firstMeshGeometry(obj), [obj]);
+  return <EditableMeshBody asset={asset} onSelect={onSelect} geometry={geometry} />;
+}
+
+/** Walk a loaded root and return the first mesh's geometry (or null). */
+function firstMeshGeometry(root: Object3D | null | undefined): BufferGeometry | null {
+  if (!root) return null;
+  let result: BufferGeometry | null = null;
+  root.traverse((child) => {
+    if (result) return;
+    const m = child as unknown as { isMesh?: boolean; geometry?: BufferGeometry };
+    if (m.isMesh && m.geometry) {
+      result = m.geometry;
+    }
+  });
+  return result;
+}
+
+/**
+ * Shared body — runs the actual edit-mode UI (vertex overlay, F-hotkey,
+ * per-frame offset application). Receives `geometry` from one of the
+ * per-type dispatch components above so its own hook count is stable
+ * regardless of asset type.
+ */
+function EditableMeshBody({
+  asset,
+  onSelect,
+  geometry,
+}: {
+  asset: AssetRef;
+  onSelect: Props['onSelect'];
+  geometry: BufferGeometry | null;
+}) {
   const vertexOffsets = asset.vertexOffsets;
   const commitMakeFace = useEditor((s) => s.commitMakeFace);
   const axisLock = useEditor((s) => s.axisLock);
@@ -39,10 +151,6 @@ export function EditableMesh({ asset, onSelect }: Props) {
   const selectedVertices = useEditor((s) => s.selectedVertices);
   const toggleSelectedVertex = useEditor((s) => s.toggleSelectedVertex);
   const isEditMode = mode === 'edit';
-
-  // Load geometry based on asset source/format. Same dispatch as
-  // MeshRenderer so edit mode sees the same geometry.
-  const geometry = useAssetGeometry(asset);
 
   // Apply offsets to the geometry every frame.
   useFrame(() => {
@@ -114,65 +222,6 @@ export function EditableMesh({ asset, onSelect }: Props) {
 }
 
 /**
- * Resolve an asset to a BufferGeometry, mirroring MeshRenderer's dispatch.
- * Returns null while loading (suspend) or for unsupported formats.
- */
-function useAssetGeometry(asset: AssetRef): BufferGeometry | null {
-  if (asset.source === 'primitive') {
-    return useMemo(() => {
-      if (!asset.primitiveType) return null;
-      switch (asset.primitiveType) {
-        case 'cube':
-          return new BoxGeometry(1, 1, 1);
-        case 'sphere':
-          return new SphereGeometry(0.6, 32, 24);
-        case 'cylinder':
-          return new CylinderGeometry(0.5, 0.5, 1.2, 32);
-      }
-    }, [asset.primitiveType]);
-  }
-  if (asset.format === 'glb' || asset.format === 'gltf') {
-    return useGLTFGeometry(asset.url!);
-  }
-  if (asset.format === 'obj') {
-    return useOBJGeometry(asset.url!);
-  }
-  return null;
-}
-
-function useGLTFGeometry(url: string): BufferGeometry | null {
-  const gltf = useGLTF(url);
-  return useMemo(() => {
-    // Take the first mesh's geometry from the gltf scene.
-    let result: BufferGeometry | null = null;
-    gltf.scene.traverse((child) => {
-      if (result) return;
-      const m = child as unknown as { isMesh?: boolean; geometry?: BufferGeometry };
-      if (m.isMesh && m.geometry) {
-        result = m.geometry;
-      }
-    });
-    return result;
-  }, [gltf]);
-}
-
-function useOBJGeometry(url: string): BufferGeometry | null {
-  const obj = useLoader(OBJLoader, url);
-  return useMemo(() => {
-    let result: BufferGeometry | null = null;
-    obj.traverse((child) => {
-      if (result) return;
-      const m = child as unknown as { isMesh?: boolean; geometry?: BufferGeometry };
-      if (m.isMesh && m.geometry) {
-        result = m.geometry;
-      }
-    });
-    // Cleanup OBJ resources on unmount.
-    return result;
-  }, [obj]);
-}
-
-/**
  * Phase 3.2a/c — yellow dots overlaid on every vertex of the geometry.
  *
  * - Click a dot: toggles it in the global `selectedVertices` list.
@@ -187,6 +236,13 @@ function useOBJGeometry(url: string): BufferGeometry | null {
  * `selectedVertices` is an array (not Set) so the order is stable
  * across re-renders — important for the F-face fan triangulation,
  * which fans from vertex 0.
+ *
+ * Hooks-order fix: previous version had `if (!positions) return null`
+ * BEFORE the useRef / useEditor / useEffect calls. If `positions`
+ * became null between renders (e.g. during a fillHoles / makeFace
+ * snapshot dance that briefly removes the position attribute), the
+ * hook count would change and React would throw #310. The early
+ * return now lives after the hooks.
  */
 function VertexOverlay({
   geometry,
@@ -203,11 +259,7 @@ function VertexOverlay({
   vertexOffsets: number[] | null;
   axisLock: 'x' | 'y' | 'z' | null;
 }) {
-  const positions = readPositions(geometry);
-  if (!positions) return null;
-  const N = positions.length / 3;
-
-  // Drag state.
+  // All hooks unconditionally — see note above about hooks-order.
   const dragRef = useRef<{
     vertexIdx: number;
     startScreen: { x: number; y: number };
@@ -288,7 +340,20 @@ function VertexOverlay({
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedVertices, axisLock, geometry, assetId, vertexOffsets, setVertexOffsets, commitVertexEdit]);
+  }, [
+    selectedVertices,
+    axisLock,
+    geometry,
+    assetId,
+    vertexOffsets,
+    setVertexOffsets,
+    commitVertexEdit,
+  ]);
+
+  // Early return goes AFTER all hooks.
+  const positions = readPositions(geometry);
+  if (!positions) return null;
+  const N = positions.length / 3;
 
   return (
     <group>
