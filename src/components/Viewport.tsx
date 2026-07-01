@@ -38,6 +38,7 @@ function Scene({ refitNonce }: { refitNonce: number }) {
   const setActiveAsset = useEditor((s) => s.setActiveAsset);
   const transformMode = useEditor((s) => s.transformMode);
   const axisLock = useEditor((s) => s.axisLock);
+  const mode = useEditor((s) => s.mode);
   const playMode = useEditor((s) => s.playMode);
   const setAssetTransform = useEditor((s) => s.setAssetTransform);
   const setAssetTransformLive = useEditor((s) => s.setAssetTransformLive);
@@ -129,8 +130,13 @@ function Scene({ refitNonce }: { refitNonce: number }) {
         TransformControls sits OUTSIDE Bounds so the gizmo helpers don't
         inflate the bounding-box calculation. It attaches to the same group
         that Bounds is fitting to, so transforms happen in the same frame.
+        Edit mode: the translate/rotate/scale gizmo would overlap the
+        yellow vertex handles and steal pointer events from vertex drags.
+        Vertex editing IS the transform in edit mode, so the gizmo is
+        hidden here. The underlying group transform is preserved — exit
+        edit mode and the gizmo comes back at the same position/rotation.
       */}
-      {groupObj && activeAsset && (
+      {mode !== 'edit' && groupObj && activeAsset && (
         <TransformControls
           object={groupObj}
           mode={transformMode}
@@ -196,6 +202,7 @@ export function Viewport() {
   const loading = useEditor((s) => s.loading);
   const setError = useEditor((s) => s.setError);
   const storeRefitNonce = useEditor((s) => s.refitRequestNonce);
+  const mode = useEditor((s) => s.mode);
 
   // Combine store-driven refits (every new asset upload) with
   // local F-key refits. The Bounds key changes whenever either ticks.
@@ -238,7 +245,11 @@ export function Viewport() {
       </ErrorBoundary>
 
       <div className="overlay">
-        <span>W/E/R mode · X/Y/Z lock · F refit · Esc deselect · ⌘Z undo · Drop to upload</span>
+        {mode === 'edit' ? (
+          <span>Arrow keys nudge (Shift = 0.5) · X/Y/Z lock axis · F make face · ⌘Z undo · Esc deselect</span>
+        ) : (
+          <span>W/E/R mode · X/Y/Z lock · F refit · Esc deselect · ⌘Z undo · Drop to upload</span>
+        )}
         {loading && <span className="loading-tag">· loading…</span>}
       </div>
 

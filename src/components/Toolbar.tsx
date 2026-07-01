@@ -80,9 +80,15 @@ export function Toolbar() {
       />
       <button
         className="primary"
-        disabled={loading || playMode}
+        disabled={loading || playMode || mode === 'edit'}
         onClick={() => inputRef.current?.click()}
-        title={playMode ? 'Stop play to upload' : 'Upload a mesh'}
+        title={
+          playMode
+            ? 'Stop play to upload'
+            : mode === 'edit'
+              ? 'Exit edit mode to upload a new mesh'
+              : 'Upload a mesh'
+        }
       >
         {loading ? 'Loading…' : 'Upload asset'}
       </button>
@@ -90,11 +96,20 @@ export function Toolbar() {
         Phase 4d: Play / Stop toggle. The button label and the
         accent color swap based on state. A clear visual cue matters
         because play is a mode that disables most other UI.
+        Edit mode disables play too — vertex editing is an offline
+        operation, not a simulation.
       */}
       <button
         className={`play-toggle${playMode ? ' playing' : ''}`}
         onClick={() => setPlayMode(!playMode)}
-        title={playMode ? 'Stop (P)' : 'Play (P)'}
+        disabled={mode === 'edit'}
+        title={
+          mode === 'edit'
+            ? 'Exit edit mode to play'
+            : playMode
+              ? 'Stop (P)'
+              : 'Play (P)'
+        }
         aria-pressed={playMode}
       >
         {playMode ? '⏹ Stop' : '▶ Play'}

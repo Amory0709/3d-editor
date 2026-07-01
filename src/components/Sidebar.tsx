@@ -173,8 +173,12 @@ export function Sidebar() {
         empty state) so ESC doesn't make the controls vanish mid-flow.
         Phase 4d: in play mode the controls are disabled (the body's
         transform is the source of truth).
+        Edit mode: the translate/rotate/scale gizmo would fight the
+        vertex-drag handles (same viewport, two competing cursors).
+        The vertex model IS the transform in edit mode, so the whole
+        Transform section is hidden here.
       */}
-      {(
+      {mode !== 'edit' && (
         <>
           <h3 className="section-title">Transform</h3>
             {activeAsset ? (
@@ -504,28 +508,35 @@ export function Sidebar() {
         "X.Xs ago" labels (playClock doesn't tick after stop); in
         play mode the labels count up live. Empty state stays for
         "no collisions yet" so the user knows the section is alive.
+        Edit mode: collisions are an artifact of play-mode simulation,
+        which is disabled in edit mode, so the whole log is hidden
+        to keep the sidebar focused on vertex editing.
       */}
-      <h3 className="section-title">Collisions ({collisionEvents.length})</h3>
-      {visibleEvents.length === 0 ? (
-        <p className="empty">
-          {playMode
-            ? 'No collisions yet — bodies are simulating.'
-            : 'No collisions recorded. Press P (▶ Play) to start a simulation.'}
-        </p>
-      ) : (
-        <ul className="collision-log">
-          {visibleEvents.map((e) => (
-            <li key={`${e.a}-${e.b}-${e.t}`} className="collision-log-row">
-              <span className="collision-log-pair">
-                {nameForAsset(e.a)} <span className="collision-log-x">⨯</span>{' '}
-                {nameForAsset(e.b)}
-              </span>
-              <span className="collision-log-time">
-                {formatElapsed(playClock - e.t)}
-              </span>
-            </li>
-          ))}
-        </ul>
+      {mode !== 'edit' && (
+        <>
+          <h3 className="section-title">Collisions ({collisionEvents.length})</h3>
+          {visibleEvents.length === 0 ? (
+            <p className="empty">
+              {playMode
+                ? 'No collisions yet — bodies are simulating.'
+                : 'No collisions recorded. Press P (▶ Play) to start a simulation.'}
+            </p>
+          ) : (
+            <ul className="collision-log">
+              {visibleEvents.map((e) => (
+                <li key={`${e.a}-${e.b}-${e.t}`} className="collision-log-row">
+                  <span className="collision-log-pair">
+                    {nameForAsset(e.a)} <span className="collision-log-x">⨯</span>{' '}
+                    {nameForAsset(e.b)}
+                  </span>
+                  <span className="collision-log-time">
+                    {formatElapsed(playClock - e.t)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </aside>
   );
