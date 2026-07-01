@@ -89,6 +89,14 @@ export function Sidebar() {
   // entries first so the user sees fresh events at the top.
   const collisionEvents = useEditor((s) => s.collisionEvents);
   const playClock = useEditor((s) => s.playClock);
+  // Read these UNCONDITIONALLY at the top — they are referenced from
+  // inside conditional JSX blocks (edit-mode toolbar / combine-mode
+  // pickers). If we called useEditor((s) => s.X) inside those
+  // conditional branches, React would see a different hook count per
+  // render depending on `mode` / `activeAsset` and throw #310
+  // (Rendered more hooks than during the previous render).
+  const selectedVertexCount = useEditor((s) => s.selectedVertices.length);
+  const combineTargetId = useEditor((s) => s.combineTargetId);
   // Cap the visible list at 10 — the store keeps up to 100 but the
   // sidebar only shows the most recent. Keeps the panel from
   // scrolling the user's view off when a busy play session fires
@@ -276,7 +284,7 @@ export function Sidebar() {
                 disabled={playMode || useEditor.getState().selectedVertices.length < 3}
                 title="Fan-triangulate the selected vertices into a face (or press F)"
               >
-                ◧ Make face ({useEditor((s) => s.selectedVertices.length)})
+                ◧ Make face ({selectedVertexCount})
               </button>
               <button
                 className="edit-btn"
@@ -333,7 +341,7 @@ export function Sidebar() {
                 <label className="combine-row">
                   <span>Target</span>
                   <select
-                    value={useEditor((s) => s.combineTargetId) ?? ''}
+                    value={combineTargetId ?? ''}
                     onChange={(e) =>
                       useEditor.getState().setCombineTarget(e.target.value || null)
                     }
@@ -363,7 +371,7 @@ export function Sidebar() {
                       useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
                     }
                   }}
-                  disabled={playMode || !activeAsset || !useEditor((s) => s.combineTargetId)}
+                  disabled={playMode || !activeAsset || !combineTargetId}
                   title="Add target to primary"
                 >
                   ∪ Union
@@ -380,7 +388,7 @@ export function Sidebar() {
                       useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
                     }
                   }}
-                  disabled={playMode || !activeAsset || !useEditor((s) => s.combineTargetId)}
+                  disabled={playMode || !activeAsset || !combineTargetId}
                   title="Cut target out of primary"
                 >
                   − Subtract
@@ -397,7 +405,7 @@ export function Sidebar() {
                       useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
                     }
                   }}
-                  disabled={playMode || !activeAsset || !useEditor((s) => s.combineTargetId)}
+                  disabled={playMode || !activeAsset || !combineTargetId}
                   title="Keep only the overlap"
                 >
                   ∩ Intersect
