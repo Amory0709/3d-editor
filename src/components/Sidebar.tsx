@@ -1,7 +1,7 @@
 import { useEditor, type TransformMode, type EditorMode, type AxisLock } from '@/store/editor';
 import { PRIMITIVE_TYPES, primitiveLabel, COLLIDER_TYPES, colliderLabel, DEFAULT_COLLIDER } from '@/lib/formats';
 import { ColliderEditor } from './ColliderEditor';
-import { fillHolesOnAsset, resetVertexEdits, makeFaceOnAsset, booleanOnAssets } from '@/lib/meshOps';
+import { fillHolesOnAsset, resetVertexEdits, makeFaceOnAsset } from '@/lib/meshOps';
 
 // 'gaussian' is intentionally omitted: phase 5 deferred and the
 // toolbar no longer surfaces it. Marked with `Partial<Record<...>>`
@@ -22,21 +22,17 @@ const MODE_BLURB: Partial<Record<EditorMode, { title: string; lines: string[] }>
       'Bodies update live in the physics world (phase 4b).',
     ],
   },
-  // 'gaussian' is intentionally omitted from HELP_MODES — phase 5
-  // is deferred and the toolbar no longer surfaces this mode (user
-  // asked to hide it).
+  // 'gaussian' and 'combine' are intentionally omitted from
+  // HELP_MODES — both modes are hidden from the toolbar (gaussian
+  // is phase-5 deferred; combine / boolean CSG is no longer used in
+  // the current workflow). When a future user lands on one of these
+  // via direct setMode() the lookup falls back to a generic helper
+  // card.
   edit: {
     title: 'Vertices mode',
     lines: [
       'Vertex-level editing — click a vertex to grab, drag to move.',
-      'Use the toolbar below: Reset / Fill holes / Make face / Boolean.',
-    ],
-  },
-  combine: {
-    title: 'Boolean mode',
-    lines: [
-      'Boolean CSG — union / subtract / intersect two selected assets.',
-      'Select two assets, then pick an operation. The result lands on the first asset.',
+      'Use the toolbar below: Reset / Fill holes / Make face.',
     ],
   },
 };
@@ -93,13 +89,13 @@ export function Sidebar() {
   const collisionEvents = useEditor((s) => s.collisionEvents);
   const playClock = useEditor((s) => s.playClock);
   // Read these UNCONDITIONALLY at the top — they are referenced from
-  // inside conditional JSX blocks (edit-mode toolbar / combine-mode
-  // pickers). If we called useEditor((s) => s.X) inside those
-  // conditional branches, React would see a different hook count per
-  // render depending on `mode` / `activeAsset` and throw #310
-  // (Rendered more hooks than during the previous render).
+  // inside conditional JSX blocks (edit-mode toolbar only; the
+  // combine-mode pickers were removed in phase 4f). If we called
+  // useEditor((s) => s.X) inside those conditional branches, React
+  // would see a different hook count per render depending on `mode`
+  // and throw #310 (Rendered more hooks than during the previous
+  // render).
   const selectedVertexCount = useEditor((s) => s.selectedVertices.length);
-  const combineTargetId = useEditor((s) => s.combineTargetId);
   // Cap the visible list at 10 — the store keeps up to 100 but the
   // sidebar only shows the most recent. Keeps the panel from
   // scrolling the user's view off when a busy play session fires
@@ -316,112 +312,13 @@ export function Sidebar() {
         </>
       )}
 
-      {mode === 'combine' && (
-        <>
-          <h3 className="section-title">Boolean</h3>
-          {assets.length < 2 ? (
-            <p className="empty section-empty">
-              Add at least two assets to perform a boolean op.
-            </p>
-          ) : (
-            <>
-              <p className="hint">
-                Pick a primary asset (left), then a target (right), then
-                choose an operation. Result lands on the primary asset.
-              </p>
-              <div className="combine-pickers">
-                <label className="combine-row">
-                  <span>Primary</span>
-                  <select
-                    value={activeAsset?.id ?? ''}
-                    onChange={(e) => setActiveAsset(e.target.value || null)}
-                    disabled={playMode}
-                  >
-                    <option value="">— pick —</option>
-                    {assets.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="combine-row">
-                  <span>Target</span>
-                  <select
-                    value={combineTargetId ?? ''}
-                    onChange={(e) =>
-                      useEditor.getState().setCombineTarget(e.target.value || null)
-                    }
-                    disabled={playMode}
-                  >
-                    <option value="">— pick —</option>
-                    {assets
-                      .filter((a) => a.id !== activeAsset?.id)
-                      .map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              </div>
-              <div className="combine-ops">
-                <button
-                  className="edit-btn"
-                  onClick={() => {
-                    const a = activeAsset;
-                    const b = useEditor.getState().combineTargetId;
-                    if (!a || !b) return;
-                    const preAssets = useEditor.getState().assets;
-                    const n = booleanOnAssets(a.id, b, 'union');
-                    if (n > 0) {
-                      useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
-                    }
-                  }}
-                  disabled={playMode || !activeAsset || !combineTargetId}
-                  title="Add target to primary"
-                >
-                  ∪ Union
-                </button>
-                <button
-                  className="edit-btn"
-                  onClick={() => {
-                    const a = activeAsset;
-                    const b = useEditor.getState().combineTargetId;
-                    if (!a || !b) return;
-                    const preAssets = useEditor.getState().assets;
-                    const n = booleanOnAssets(a.id, b, 'subtract');
-                    if (n > 0) {
-                      useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
-                    }
-                  }}
-                  disabled={playMode || !activeAsset || !combineTargetId}
-                  title="Cut target out of primary"
-                >
-                  − Subtract
-                </button>
-                <button
-                  className="edit-btn"
-                  onClick={() => {
-                    const a = activeAsset;
-                    const b = useEditor.getState().combineTargetId;
-                    if (!a || !b) return;
-                    const preAssets = useEditor.getState().assets;
-                    const n = booleanOnAssets(a.id, b, 'intersect');
-                    if (n > 0) {
-                      useEditor.getState().commitMakeFace(a.id, preAssets, [n]);
-                    }
-                  }}
-                  disabled={playMode || !activeAsset || !combineTargetId}
-                  title="Keep only the overlap"
-                >
-                  ∩ Intersect
-                </button>
-              </div>
-            </>
-          )}
-        </>
-      )}
+      {/*
+        Phase 4f: boolean CSG mode is no longer surfaced.
+        The 'combine' EditorMode id is still in the type for
+        future re-introduction; no UI surfaces it. Wire up
+        booleanOnAssets / setCombineTarget UI again if we ever
+        need this feature.
+      */}
 
       {mode === 'collision' && (
         <>

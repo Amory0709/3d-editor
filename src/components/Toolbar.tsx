@@ -7,13 +7,12 @@ const MODES: { id: EditorMode; label: string }[] = [
   { id: 'mesh', label: 'Mesh' },
   { id: 'collision', label: 'Collision' },
   { id: 'edit', label: 'Vertices' },
-  { id: 'combine', label: 'Boolean' },
 ];
-// 'gaussian' is intentionally NOT in the toolbar — phase 5 deferred.
-// The mode id still exists in the EditorMode union for type safety,
-// but no UI surfaces it (user feedback: hide gassian). The mode id
-// remains reachable only by direct setMode() calls (not currently
-// used).
+// 'gaussian' and 'combine' are intentionally NOT in the toolbar
+// — both deferred / unused in the current workflow. The mode ids
+// still exist in the EditorMode union for type safety (so a
+// future setMode() call with a valid id compiles), but no UI
+// surfaces them (user feedback: hide both).
 
 export function Toolbar() {
   const mode = useEditor((s) => s.mode);
