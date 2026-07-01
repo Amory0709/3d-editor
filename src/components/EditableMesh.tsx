@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useLoader, useThree } from '@react-three/fiber';
-import { Edges, useGLTF } from '@react-three/drei';
+import { useGLTF } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import type { BufferGeometry, Camera, Object3D, PerspectiveCamera } from 'three';
+import {
+  EdgesGeometry,
+  type BufferGeometry,
+  type Camera,
+  type LineSegments,
+  type Object3D,
+  type PerspectiveCamera,
+  WireframeGeometry,
+} from 'three';
 import { Vector3 } from 'three';
 import type { AssetRef } from '@/store/editor';
 import type { PrimitiveType } from '@/lib/formats';
@@ -136,6 +144,69 @@ function firstMeshGeometry(root: Object3D | null | undefined): BufferGeometry | 
  * per-type dispatch components above so its own hook count is stable
  * regardless of asset type.
  */
+
+/**
+ * Phase 3.2a — wireframe that follows the live (mutated) geometry.
+ *
+ * drei's `<Edges>` uses useLayoutEffect to build EdgesGeometry ONCE
+ * and caches it as long as the geometry *reference* is unchanged.
+ * In EditableMesh, the geometry's position attribute is mutated
+ * in place every frame by useFrame to apply vertexOffsets. Same
+ * BufferGeometry reference, different positions — drei's cache
+ * stays stale and the wireframe renders against the *original*
+ * (pre-drag) positions, not the current visual shape.
+ *
+ * User-visible symptoms this caused:
+ *   - "看不到三角": EdgesGeometry with threshold=1 only shows
+ *     hard (≥1° dihedral) edges, so quad→triangle diagonals (0°)
+ *     are hidden. We pass `includeDiagonals=true` and rebuild
+ *     via WireframeGeometry to expose the triangulation.
+ *   - "拖得时间久面片越来越大": cube deforms as the user drags
+ *     a vertex, but the cached edges stay at the original
+ *     positions, so the visual wireframe appears to lag behind
+ *     the mesh. User perceives the cube face as 'growing' past
+ *     its wireframe.
+ *
+ * Fix: rebuild the wireframe geometry every frame from the
+ * CURRENT position attribute (which useFrame has just written).
+ * Cost is trivial for our meshes (cube = 24 verts, complex GLB
+ * typically <10k). If we ever ship a mesh with >50k verts this
+ * becomes a hot spot and we should switch to dirty-flag rebuild.
+ */
+function LiveWireframe({
+  geometry,
+  color,
+  includeDiagonals,
+}: {
+  geometry: BufferGeometry;
+  color: string;
+  includeDiagonals: boolean;
+}) {
+  const lineRef = useRef<LineSegments>(null);
+  const lastGeomRef = useRef<BufferGeometry | null>(null);
+
+  useFrame(() => {
+    if (!lineRef.current) return;
+    // Rebuild from the live geometry (positions reflect current
+    // vertexOffsets because useFrame just wrote them). EdgesGeometry
+    // hides coplanar edges (threshold default 1°); WireframeGeometry
+    // shows every edge of every triangle, including the diagonals
+    // that split each quad face into 2 triangles.
+    const next = includeDiagonals
+      ? new WireframeGeometry(geometry)
+      : new EdgesGeometry(geometry, 1);
+    if (lastGeomRef.current) lastGeomRef.current.dispose();
+    lineRef.current.geometry = next;
+    lastGeomRef.current = next;
+  });
+
+  return (
+    <lineSegments ref={lineRef}>
+      <lineBasicMaterial color={color} />
+    </lineSegments>
+  );
+}
+
 function EditableMeshBody({
   asset,
   onSelect,
@@ -237,13 +308,25 @@ function EditableMeshBody({
       <mesh onClick={onSelect}>
         <primitive object={geometry} attach="geometry" />
         <meshStandardMaterial color="#6da7ff" metalness={0.15} roughness={0.4} />
-        {/* Wireframe overlay so the user can see the mesh structure while
-            picking vertices. threshold=1 keeps all hard edges visible
-            (cube → 12 edges). Color is a dark navy that contrasts 6:1
-            against the #6da7ff mesh material — the previous #e8f1ff was
-            only 2:1 and effectively invisible. */}
-        <Edges color="#1a2540" threshold={1} />
       </mesh>
+      {/*
+        Live wireframe (sibling, not child) so it has its own geometry
+        pipeline. See LiveWireframe above for why drei's <Edges> doesn't
+        work here — it caches against the geometry reference, but our
+        useFrame mutates the position attribute in place, so drei never
+        re-reads it. The wireframe would be stuck on the original
+        pre-drag shape.
+
+        includeDiagonals=true: shows every triangle edge, including
+        the diagonal that splits each cube face into 2 triangles.
+        EdgesGeometry(threshold=1) only shows ≥1° dihedral edges and
+        hides those 0° diagonals.
+      */}
+      <LiveWireframe
+        geometry={geometry}
+        color="#1a2540"
+        includeDiagonals={true}
+      />
       {isEditMode && vertexCount > 0 && (
         <VertexOverlay
           geometry={geometry}
