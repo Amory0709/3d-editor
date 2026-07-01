@@ -53,6 +53,18 @@ const lastShapeKey = new Map<string, string>();
  *  canonical (a, b) pair. */
 const pendingCollisionEvents: Array<{ a: string; b: string }> = [];
 
+/**
+ * Module-level reference to the infinite ground plane body, added once
+ * per world creation (in getPhysicsWorld). Stored so resetPhysicsWorld
+ * can remove it cleanly — `removeBody` needs the body ref.
+ *
+ * We keep this outside the bodyByAssetId map on purpose: the ground
+ * isn't tied to any asset and syncBodies()'s "remove bodies whose
+ * assets disappeared" pass would otherwise yank it out the moment an
+ * asset is removed. The ground should outlive every asset churn.
+ */
+let groundBody: CANNON.Body | null = null;
+
 /** Lazily create the world. Gravity = -9.81 on Y, real-world-ish. */
 export function getPhysicsWorld(): CANNON.World {
   if (!world) {
@@ -67,6 +79,23 @@ export function getPhysicsWorld(): CANNON.World {
     // shape/dynamic changes), and we don't have to track listener
     // lifecycle as bodies come and go.
     world.addEventListener('beginContact', onBeginContact);
+    // Phase 4f: infinite ground plane at y=0, normal up. Without
+    // this, dynamic bodies in play mode just fall forever (no
+    // terrain = no contact events ever). cannon-es Plane is
+    // infinite — exactly what a "floor" should be — and we make it
+    // static so it never moves under any load.
+    groundBody = new CANNON.Body({
+      mass: 0,
+      type: CANNON.Body.STATIC,
+      shape: new CANNON.Plane(),
+    });
+    // Default Plane normal is +Z; rotate so the floor surface is
+    // horizontal with normal +Y (matching world gravity -Y).
+    groundBody.quaternion.setFromAxisAngle(
+      new CANNON.Vec3(1, 0, 0),
+      -Math.PI / 2,
+    );
+    world.addBody(groundBody);
   }
   return world;
 }
@@ -83,6 +112,7 @@ export function resetPhysicsWorld(): void {
   lastShapeKey.clear();
   pendingCollisionEvents.length = 0;
   world = null;
+  groundBody = null;
 }
 
 /** For tests / debugging: get the body attached to an asset, if any. */

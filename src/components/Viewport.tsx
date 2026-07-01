@@ -103,6 +103,30 @@ function Scene({ refitNonce }: { refitNonce: number }) {
       />
       <axesHelper args={[1.5]} />
 
+      {/*
+        Phase 4f — solid ground plane for visual reference. Pairs
+        with the infinite cannon-es Plane body added in lib/physics.ts
+        ensureGroundBody(). Sits at y=0 just like the Grid above so
+        falling bodies in play mode rest visibly on this surface
+        rather than vanishing below the scene. 60×60 is wide enough
+        to cover the camera's view at default zoom; the Grid still
+        pokes through at the edges thanks to the fade falloff.
+        Slight roughness so it doesn't act like a mirror under the
+        directional lights.
+      */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.001, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[60, 60]} />
+        <meshStandardMaterial
+          color="#161c2a"
+          roughness={0.95}
+          metalness={0}
+        />
+      </mesh>
+
       <Suspense fallback={<LoadingHint />}>
         <Bounds key={boundsKey} fit clip margin={1.4}>
           {/*

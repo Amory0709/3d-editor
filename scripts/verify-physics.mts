@@ -504,7 +504,10 @@ function reset(): void {
   resetPhysicsWorld();
   check('17b. resetPhysicsWorld → 0 bodies', getBodyCount() === 0);
   const w = getPhysicsWorld();
-  check('17c. world is fresh singleton after reset', w.bodies.length === 0, `bodies=${w.bodies.length}`);
+  // Phase 4f: a fresh world now contains the static ground plane body
+  // (mass=0, infinite Plane at y=0). Previously this was 0 — ground
+  // was added as a separate concern.
+  check('17c. world is fresh singleton after reset', w.bodies.length === 1, `bodies=${w.bodies.length}`);
 }
 
 // ─── Test 18: mixed (some with, some without collider) ────────────
