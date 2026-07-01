@@ -40,6 +40,12 @@ function Scene({ refitNonce }: { refitNonce: number }) {
   const axisLock = useEditor((s) => s.axisLock);
   const mode = useEditor((s) => s.mode);
   const playMode = useEditor((s) => s.playMode);
+  // Phase 3.2a — locked while the user is dragging a vertex in edit
+  // mode. See EditableMesh for the full reasoning; tl;dr OrbitControls
+  // listens to canvas pointermove (separate from R3F's event tree), so
+  // it would otherwise rotate the camera mid-drag and the vertex would
+  // fly away from the cursor.
+  const vertexDragging = useEditor((s) => s.vertexDragging);
   const setAssetTransform = useEditor((s) => s.setAssetTransform);
   const setAssetTransformLive = useEditor((s) => s.setAssetTransformLive);
   const commitTransformDrag = useEditor((s) => s.commitTransformDrag);
@@ -177,7 +183,7 @@ function Scene({ refitNonce }: { refitNonce: number }) {
         />
       )}
 
-      <OrbitControls makeDefault enableDamping dampingFactor={0.1} />
+      <OrbitControls makeDefault enableDamping dampingFactor={0.1} enabled={!vertexDragging} />
 
       {/*
         Phase 4b: headless tick that reconciles + steps the physics

@@ -209,9 +209,10 @@ function EditableMeshBody({
         <meshStandardMaterial color="#6da7ff" metalness={0.15} roughness={0.4} />
         {/* Wireframe overlay so the user can see the mesh structure while
             picking vertices. threshold=1 keeps all hard edges visible
-            (cube → 12 edges). Color is a slightly desaturated white that
-            reads on top of the light-blue material without overpowering. */}
-        <Edges color="#e8f1ff" threshold={1} />
+            (cube → 12 edges). Color is a dark navy that contrasts 6:1
+            against the #6da7ff mesh material — the previous #e8f1ff was
+            only 2:1 and effectively invisible. */}
+        <Edges color="#1a2540" threshold={1} />
       </mesh>
       {isEditMode && vertexCount > 0 && (
         <VertexOverlay
@@ -282,6 +283,7 @@ function VertexOverlay({
   } | null>(null);
   const commitVertexEdit = useEditor((s) => s.commitVertexEdit);
   const setVertexOffsets = useEditor((s) => s.setVertexOffsets);
+  const setVertexDragging = useEditor((s) => s.setVertexDragging);
 
   // R3F provides camera + viewport size for the camera-distance-aware
   // drag scale. Captured via useThree so we don't recompute on every
@@ -409,6 +411,11 @@ function VertexOverlay({
         dragRef.current = null;
         commitVertexEdit(pre);
       }
+      // Always release the OrbitControls lock — even if dragRef was
+      // already null, the local mesh pointerUp might have raced
+      // and left setVertexDragging(true) lingering. Clearing it on
+      // ANY pointerup is the safest invariant.
+      setVertexDragging(false);
     }
     window.addEventListener('pointerup', onWindowPointerUp);
     window.addEventListener('pointercancel', onWindowPointerUp);
@@ -416,7 +423,7 @@ function VertexOverlay({
       window.removeEventListener('pointerup', onWindowPointerUp);
       window.removeEventListener('pointercancel', onWindowPointerUp);
     };
-  }, [commitVertexEdit]);
+  }, [commitVertexEdit, setVertexDragging]);
 
   // Robustness: when VertexOverlay unmounts (mode switch out of edit,
   // asset deletion, route change) with a drag in flight, commit the
@@ -431,8 +438,11 @@ function VertexOverlay({
         dragRef.current = null;
         commitVertexEdit(pre);
       }
+      // Make sure OrbitControls re-enables even if the user was mid-drag
+      // when mode / asset changed (which unmounts VertexOverlay).
+      setVertexDragging(false);
     };
-  }, [commitVertexEdit]);
+  }, [commitVertexEdit, setVertexDragging]);
 
   // Early return goes AFTER all hooks.
   const positions = readPositions(geometry);
@@ -453,6 +463,13 @@ function VertexOverlay({
             onPointerDown={(e) => {
               e.stopPropagation();
               onToggle(i);
+              // Lock OrbitControls while dragging a vertex — otherwise
+              // it listens to canvas pointermove (separate from R3F's
+              // event tree) and rotates the camera, which makes the
+              // captured cameraRight / cameraUp basis stale and the
+              // vertex "flies out" of the cursor. Viewport reads this
+              // flag and passes it to <OrbitControls enabled={...}>.
+              setVertexDragging(true);
               // Compute screen→world scale from camera distance to the
               // vertex so the drag feels 1:1 with the cursor no matter
               // how zoomed in/out the viewport is.
@@ -554,6 +571,7 @@ function VertexOverlay({
                 dragRef.current = null;
                 commitVertexEdit(pre);
               }
+              setVertexDragging(false);
               (e.target as Element)?.releasePointerCapture?.(e.pointerId);
             }}
           >

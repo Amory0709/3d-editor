@@ -256,6 +256,19 @@ interface EditorState {
   playClock: number;
   tickPlayClock: (dt: number) => void;
 
+  /**
+   * Phase 3.2a — true while the user is dragging a vertex handle in
+   * EditableMesh. Viewport reads this to disable OrbitControls so the
+   * camera doesn't rotate while the user is dragging a vertex. With
+   * OrbitControls left enabled, the camera rotates on every pointermove
+   * (it listens to canvas DOM events, separate from R3F's event tree),
+   * which makes the captured cameraRight / cameraUp basis stale and
+   * the vertex appears to "fly" away from the cursor. See EditableMesh
+   * onPointerDown / Viewport <OrbitControls enabled={...}>.
+   */
+  vertexDragging: boolean;
+  setVertexDragging: (dragging: boolean) => void;
+
   /** primitive authoring (phase 3) */
   addPrimitive: (type: PrimitiveType) => void;
 
@@ -711,6 +724,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!s.playMode) return s;
       return { playClock: s.playClock + dt };
     }),
+
+  // Phase 3.2a — UI flag toggled by EditableMesh around vertex drag
+  // (pointerDown sets true, pointerUp / window pointerup / unmount
+  // set false). Viewport reads it to disable OrbitControls.
+  vertexDragging: false,
+  setVertexDragging: (dragging) => set({ vertexDragging: dragging }),
 
   addPrimitive: (type) => {
     const id = crypto.randomUUID();
