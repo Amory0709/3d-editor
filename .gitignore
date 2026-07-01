@@ -8,3 +8,5 @@ dist
 # developer tooling that should live in user-level dirs, not in the project
 .agents
 skills-lock.json
+# local fixture output (canonical copy lives at public/fixtures/)
+/holey-cube.glb
