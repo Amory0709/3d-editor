@@ -13,7 +13,6 @@ import type { Group } from 'three';
 import { useEditor, type AssetRef, type ObjectTransform } from '@/store/editor';
 import { handleFiles } from '@/lib/upload';
 import { TransformableAsset } from './TransformableAsset';
-import { DemoCube } from './DemoCube';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PhysicsTicker } from './PhysicsTicker';
 import { useEditorShortcuts } from '@/lib/keyboard';
@@ -49,7 +48,6 @@ function Scene({ refitNonce }: { refitNonce: number }) {
   const setAssetTransform = useEditor((s) => s.setAssetTransform);
   const setAssetTransformLive = useEditor((s) => s.setAssetTransformLive);
   const commitTransformDrag = useEditor((s) => s.commitTransformDrag);
-  const showDemo = assets.length === 0;
 
   // Ref to the controlled group so TransformControls can attach to it.
   // We use a callback ref that triggers a state update so TransformControls
@@ -107,28 +105,22 @@ function Scene({ refitNonce }: { refitNonce: number }) {
 
       <Suspense fallback={<LoadingHint />}>
         <Bounds key={boundsKey} fit clip margin={1.4}>
-          {showDemo ? (
-            <DemoCube />
-          ) : (
-            <>
-              {/*
-                Render ALL assets, not just the active one. The
-                click-to-select handler changes activeAssetId so the
-                gizmo follows the user's pick. Without this, only the
-                selected asset is in the scene at any time — every
-                other one is invisible despite being in the store.
-              */}
-              {assets.map((a) => (
-                <TransformableAsset
-                  key={a.id}
-                  asset={a}
-                  onSelect={() => setActiveAsset(a.id)}
-                  ref={a.id === activeAsset?.id ? setGroupObj : undefined}
-                  editable={a.id === activeAsset?.id}
-                />
-              ))}
-            </>
-          )}
+          {/*
+            Render ALL assets, not just the active one. The
+            click-to-select handler changes activeAssetId so the
+            gizmo follows the user's pick. Without this, only the
+            selected asset is in the scene at any time — every
+            other one is invisible despite being in the store.
+          */}
+          {assets.map((a) => (
+            <TransformableAsset
+              key={a.id}
+              asset={a}
+              onSelect={() => setActiveAsset(a.id)}
+              ref={a.id === activeAsset?.id ? setGroupObj : undefined}
+              editable={a.id === activeAsset?.id}
+            />
+          ))}
         </Bounds>
       </Suspense>
 
