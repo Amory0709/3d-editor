@@ -153,14 +153,44 @@ function EditableMeshBody({
   const toggleSelectedVertex = useEditor((s) => s.toggleSelectedVertex);
   const isEditMode = mode === 'edit';
 
-  // Apply offsets to the geometry every frame.
+  // Phase 3.2a — snapshot the ORIGINAL base positions once per geometry.
+  // The useFrame below applies vertexOffsets to the base on every frame.
+  // Without this snapshot, useFrame would read its own previous output
+  // (attr.array is mutated in place) and the offsets would compound
+  // every frame, drifting the vertex to infinity within ~1s of dragging
+  // by 0.3 units. See repro in scripts/cumulative-bug-repro.mts.
+  //
+  // The ref is keyed on `geometry` (object identity), so when a new
+  // geometry replaces the old one (model reload, CSG result, etc.) we
+  // re-snapshot. BufferGeometry is a mutable object, but we treat the
+  // first observation as the canonical base; later external mutations
+  // (e.g. boolean CSG replacing the geometry entirely) will swap the
+  // object reference and we'll snapshot the new one.
+  const basePositionsRef = useRef<{
+    base: Float32Array;
+    geom: BufferGeometry;
+  } | null>(null);
+  if (geometry && basePositionsRef.current?.geom !== geometry) {
+    const positions = readPositions(geometry);
+    if (positions) {
+      basePositionsRef.current = {
+        base: new Float32Array(positions), // copy, not alias
+        geom: geometry,
+      };
+    }
+  }
+
+  // Apply offsets to the geometry every frame. Reads from the snapshotted
+  // base (NOT from attr.array) so the operation is idempotent and the
+  // vertex stays exactly where the user dragged it instead of drifting
+  // away at +offset/frame.
   useFrame(() => {
     if (!geometry) return;
-    const positions = readPositions(geometry);
-    if (!positions) return;
-    const next = applyOffsets(positions, vertexOffsets);
+    const snap = basePositionsRef.current;
+    if (!snap) return;
     const attr = geometry.getAttribute('position');
     if (!attr) return;
+    const next = applyOffsets(snap.base, vertexOffsets);
     attr.array.set(next);
     attr.needsUpdate = true;
     geometry.computeBoundingSphere();
