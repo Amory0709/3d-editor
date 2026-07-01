@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useLoader, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
@@ -439,6 +439,17 @@ function VertexOverlay({
   const commitVertexEdit = useEditor((s) => s.commitVertexEdit);
   const setVertexOffsets = useEditor((s) => s.setVertexOffsets);
   const setVertexDragging = useEditor((s) => s.setVertexDragging);
+  // Track which vertex is currently being dragged (pointer is down, drag
+  // in flight). Used to color the dragged sphere red and the rest
+  // yellow — matches user mental model: 'red = I'm touching this now,
+  // yellow = nothing happening'. Was previously 'red = selectedVertices
+  // membership' which made clicked-but-not-dragged dots permanently red
+  // — user reported that as confusing (commit ee8ed7c feedback).
+  //
+  // Local state, not store: this is a per-frame UI affordance, not
+  // project data. Triggers a re-render of VertexOverlay's sphere list
+  // (8 spheres for a cube — cheap).
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
 
   // R3F provides camera + viewport size for the camera-distance-aware
   // drag scale. Captured via useThree so we don't recompute on every
@@ -571,6 +582,10 @@ function VertexOverlay({
       // and left setVertexDragging(true) lingering. Clearing it on
       // ANY pointerup is the safest invariant.
       setVertexDragging(false);
+      // Drag visual: red → yellow on any pointerup, so a release
+      // outside the canvas (off the dot, into a sidebar input) still
+      // snaps the sphere back to its idle color.
+      setDraggingIdx(null);
     }
     window.addEventListener('pointerup', onWindowPointerUp);
     window.addEventListener('pointercancel', onWindowPointerUp);
@@ -578,7 +593,7 @@ function VertexOverlay({
       window.removeEventListener('pointerup', onWindowPointerUp);
       window.removeEventListener('pointercancel', onWindowPointerUp);
     };
-  }, [commitVertexEdit, setVertexDragging]);
+  }, [commitVertexEdit, setVertexDragging, setDraggingIdx]);
 
   // Robustness: when VertexOverlay unmounts (mode switch out of edit,
   // asset deletion, route change) with a drag in flight, commit the
@@ -610,7 +625,14 @@ function VertexOverlay({
         const x = positions[i * 3];
         const y = positions[i * 3 + 1];
         const z = positions[i * 3 + 2];
-        const isSelected = selectedVertices.includes(i);
+        // Sphere visual is keyed off the LIVE drag state, not the
+        // persistent selection array. During a drag this vertex turns
+        // red; on release it goes back to yellow. Multi-select for
+        // F-face still updates selectedVertices in the store (called
+        // from onToggle below) so the feature still works, just
+        // without a dedicated 'selected' visual — the user can see
+        // it light up red on click and then yellow again.
+        const isDragging = draggingIdx === i;
         return (
           <mesh
             key={i}
@@ -618,6 +640,11 @@ function VertexOverlay({
             onPointerDown={(e) => {
               e.stopPropagation();
               onToggle(i);
+              // Mark this vertex as actively being dragged so its
+              // sphere can switch from yellow to red. Reset by
+              // onPointerUp, the window-level cleanup, and the
+              // unmount cleanup.
+              setDraggingIdx(i);
               // Lock OrbitControls while dragging a vertex — otherwise
               // it listens to canvas pointermove (separate from R3F's
               // event tree) and rotates the camera, which makes the
@@ -755,24 +782,33 @@ function VertexOverlay({
                 commitVertexEdit(pre);
               }
               setVertexDragging(false);
+              // Drag ends → sphere returns to yellow. Even if onToggle
+              // added i to selectedVertices earlier, the user sees
+              // 'red while I'm holding it, yellow after'.
+              setDraggingIdx(null);
               (e as ThreeEvent<PointerEvent> & {
                 releasePointerCapture: (id: number) => void;
               }).releasePointerCapture?.(e.pointerId);
             }}
           >
             {/*
-              Sphere sizes: 0.025 unselected, 0.04 selected.
-              With R3F pointer capture working, the drag follows the
-              cursor regardless of hit-testing (see fix c013dd1), so
-              we don't need the bigger 0.04/0.07 hit target. User
-              reported '红色编辑的点很大' — the 0.07 selected size was
-              visually overwhelming the cube. ~6px unselected /
-              ~10px selected on default 1080px viewport keeps the
-              spheres easy to grab (capture means the raycast miss on
-              subsequent frames is fine) without clutter.
+              Sphere size + color by drag state (not selection).
+              Visual states:
+                - Default (no drag):  yellow #ffeb3b, radius 0.025
+                - Actively dragged:   red    #ff5e5e, radius 0.04
+              Slightly bigger when being dragged so it's easier to
+              see which vertex owns the input focus. Was previously
+              'yellow when default, red when selectedVertices includes
+              i' which made click-only selections stay permanently red
+              — user feedback ('红点应该拖拽的时候才是红色吧, 停止拖拽了是黄色').
+              The selectedVertices store is still updated for the F
+              face-creation shortcut; that feature has no persistent
+              visual indicator any more. If we want one back, the right
+              place is a separate color (e.g. orange) and a separate
+              visual cue ('currently selected for F').
             */}
-            <sphereGeometry args={[isSelected ? 0.04 : 0.025, 8, 8]} />
-            <meshBasicMaterial color={isSelected ? '#ff5e5e' : '#ffeb3b'} />
+            <sphereGeometry args={[isDragging ? 0.04 : 0.025, 8, 8]} />
+            <meshBasicMaterial color={isDragging ? '#ff5e5e' : '#ffeb3b'} />
           </mesh>
         );
       })}
