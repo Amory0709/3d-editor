@@ -3,7 +3,11 @@ import { PRIMITIVE_TYPES, primitiveLabel, COLLIDER_TYPES, colliderLabel, DEFAULT
 import { ColliderEditor } from './ColliderEditor';
 import { fillHolesOnAsset, resetVertexEdits, makeFaceOnAsset, booleanOnAssets } from '@/lib/meshOps';
 
-const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
+// 'gaussian' is intentionally omitted: phase 5 deferred and the
+// toolbar no longer surfaces it. Marked with `Partial<Record<...>>`
+// so adding a new EditorMode that hasn't been blurbed yet is a
+// compile-error too — good safety against regression.
+const MODE_BLURB: Partial<Record<EditorMode, { title: string; lines: string[] }>> = {
   mesh: {
     title: 'Mesh mode',
     lines: [
@@ -18,22 +22,18 @@ const MODE_BLURB: Record<EditorMode, { title: string; lines: string[] }> = {
       'Bodies update live in the physics world (phase 4b).',
     ],
   },
-  gaussian: {
-    title: 'Gaussian mode',
-    lines: [
-      'Upload a .splat / .ply / .spz to begin.',
-      'Phase 5 will add box-select delete, brush edit, transform, recolor.',
-    ],
-  },
+  // 'gaussian' is intentionally omitted from HELP_MODES — phase 5
+  // is deferred and the toolbar no longer surfaces this mode (user
+  // asked to hide it).
   edit: {
-    title: 'Edit mode',
+    title: 'Vertices mode',
     lines: [
       'Vertex-level editing — click a vertex to grab, drag to move.',
-      'Use the toolbar below: Reset / Fill holes / Make face / Combine.',
+      'Use the toolbar below: Reset / Fill holes / Make face / Boolean.',
     ],
   },
   combine: {
-    title: 'Combine mode',
+    title: 'Boolean mode',
     lines: [
       'Boolean CSG — union / subtract / intersect two selected assets.',
       'Select two assets, then pick an operation. The result lands on the first asset.',
@@ -77,7 +77,10 @@ export function Sidebar() {
   const redo = useEditor((s) => s.redo);
   const canUndo = useEditor((s) => s.canUndo());
   const canRedo = useEditor((s) => s.canRedo());
-  const blurb = MODE_BLURB[mode];
+  // MODE_BLURB is Partial because the 'gaussian' mode (hidden from
+  // the toolbar) has no blurb. Fall back to a generic helper card if
+  // we ever land on a mode without one.
+  const blurb = MODE_BLURB[mode] ?? { title: 'Editor', lines: [] };
   const playMode = useEditor((s) => s.playMode);
 
   const activeAsset = activeAssetId
@@ -315,10 +318,10 @@ export function Sidebar() {
 
       {mode === 'combine' && (
         <>
-          <h3 className="section-title">Combine</h3>
+          <h3 className="section-title">Boolean</h3>
           {assets.length < 2 ? (
             <p className="empty section-empty">
-              Add at least two assets to combine.
+              Add at least two assets to perform a boolean op.
             </p>
           ) : (
             <>
