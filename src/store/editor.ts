@@ -83,6 +83,15 @@ export interface AssetRef {
    * Stored as plain arrays for zustand compatibility.
    */
   geometrySnapshot: { positions: number[]; indices: number[] | null } | null;
+
+  /**
+   * Bumped on every destructive geometry mutation (hole-fill, make-face,
+   * boolean). The undo/redo comparison uses this nonce — not the
+   * snapshot reference — because commitMakeFace enriches preAssets with
+   * the same snapshot object, so reference equality would always be true.
+   * (See commitMakeFace for the rationale.)
+   */
+  geometryMutationNonce: number;
 }
 
 /**
@@ -551,12 +560,30 @@ export const useEditor = create<EditorState>((set, get) => ({
    * `triangleIndices` is the new triangles' vertex indices as a flat
    * array — we use it to detect whether anything actually changed
    * (zero-length array = nothing to do).
+   *
+   * Snapshot attachment: meshOps calls setGeometrySnapshot BEFORE the
+   * mutation, so the current AssetRef has the snapshot and preFaceAssets
+   * (captured before setGeometrySnapshot) does not. We attach the
+   * current snapshot to the preFaceAssets entry so undo can find it —
+   * otherwise GeometryUndoBridge would see `null` on the restored asset
+   * and silently skip restoring BufferGeometry.
+   *
+   * The undo/redo comparison uses `geometryMutationNonce` (not the
+   * snapshot reference) precisely because the reference is now shared
+   * between cur and pre after this enrichment.
    */
   commitMakeFace: (_id: string, preFaceAssets: AssetRef[], triangleIndices: number[]) =>
     set((s) => {
       if (triangleIndices.length === 0) return s;
+      const curAsset = s.assets.find((a) => a.id === _id);
+      const snap = curAsset?.geometrySnapshot ?? null;
+      const enriched = snap
+        ? preFaceAssets.map((a) =>
+            a.id === _id ? { ...a, geometrySnapshot: snap } : a,
+          )
+        : preFaceAssets;
       return {
-        history: snapshotHistory(s.history, preFaceAssets),
+        history: snapshotHistory(s.history, enriched),
         selectedVertices: [],
         refitRequestNonce: s.refitRequestNonce + 1,
       };
@@ -700,6 +727,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       collider: null,
       vertexOffsets: null,
       geometrySnapshot: null,
+      geometryMutationNonce: 0,
     };
     set((s) => {
       // Phase 4d safety net: same as addAsset — primitives add an
@@ -755,14 +783,16 @@ export const useEditor = create<EditorState>((set, get) => ({
     const nextPast = history.past.slice(0, -1);
 
     // Phase 3.2b/3.2c/5 — restore geometry buffers for any asset whose
-    // geometrySnapshot changed between `prev` and current `assets`.
-    // The snapshot is the pre-mutation state; restoring it rewinds
-    // hole-fill / make-face / boolean.
+    // BufferGeometry was mutated between `prev` and current `assets`.
+    // We compare geometryMutationNonce (a counter that meshOps bumps on
+    // every destructive mutation) instead of snapshot references,
+    // because commitMakeFace enriches preAssets with the same snapshot
+    // object as cur, so reference equality would always be true.
     const changedAssetIds: string[] = [];
     for (const cur of assets) {
       const pre = prev.find((a) => a.id === cur.id);
       if (!pre) continue;
-      if (pre.geometrySnapshot !== cur.geometrySnapshot) {
+      if ((cur.geometryMutationNonce ?? 0) !== (pre.geometryMutationNonce ?? 0)) {
         changedAssetIds.push(cur.id);
       }
     }
@@ -792,13 +822,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     const next = history.future[0];
     const rest = history.future.slice(1);
 
-    // Phase 3.2b/3.2c/5 — see undo() above. Apply same geometry-restore
-    // logic in reverse.
+    // Phase 3.2b/3.2c/5 — see undo() above. Compare nonces (not snapshot
+    // refs, which are shared post-commitMakeFace enrichment).
     const changedAssetIds: string[] = [];
     for (const cur of assets) {
       const post = next.find((a) => a.id === cur.id);
       if (!post) continue;
-      if (post.geometrySnapshot !== cur.geometrySnapshot) {
+      if ((cur.geometryMutationNonce ?? 0) !== (post.geometryMutationNonce ?? 0)) {
         changedAssetIds.push(cur.id);
       }
     }

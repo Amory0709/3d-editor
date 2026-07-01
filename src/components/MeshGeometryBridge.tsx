@@ -82,7 +82,18 @@ export function GeometryUndoBridge() {
       const geom = getGeometry(id);
       if (!geom) continue;
       const snap = asset.geometrySnapshot;
-      if (!snap) continue;
+      if (!snap) {
+        // The undo/redo comparison flagged this asset as having a
+        // BufferGeometry change, but the asset's snapshot is null.
+        // Most likely cause: the asset was mutated by a code path
+        // that didn't call setGeometrySnapshot, or the asset was
+        // removed and re-added in the same undo step. Log so we can
+        // diagnose; skip the restore (nothing to write).
+        console.warn(
+          `[GeometryUndoBridge] no snapshot for asset ${id} (in geometryUndoTargets); skipping BufferGeometry restore`,
+        );
+        continue;
+      }
       // Restore positions.
       const posArr = new Float32Array(snap.positions);
       const posAttr = geom.getAttribute('position');

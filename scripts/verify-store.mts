@@ -123,6 +123,82 @@ const cubeAsset = useEditor.getState().assets.find((a) => a.id === cubeId)!;
   );
 }
 
+// ─── Phase 3.2 fix: geometry undo with enriched preAssets ───────────────
+//
+// Regression: preAssets (captured BEFORE setGeometrySnapshot) didn't
+// carry the snapshot, so after undo the asset's geometrySnapshot was
+// null and the bridge silently skipped BufferGeometry restore.
+//
+// The fix:
+//   1. commitMakeFace enriches preAssets with the current snapshot
+//   2. The per-asset geometryMutationNonce is the comparison signal
+//      in undo/redo (snapshot refs would be shared after enrichment)
+console.log('\n── phase 3.2 fix: geometry undo preserves snapshot in preAssets ──');
+
+// Test: commitMakeFace enriches preAssets so undo has the snapshot.
+{
+  useEditor.getState().resetHistoryForTest();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+
+  // Simulate the meshOps pattern: setGeometrySnapshot BEFORE mutation,
+  // bump nonce, then commitMakeFace with preAssets captured BEFORE the
+  // setGeometrySnapshot call (which is the bug we're fixing).
+  const preAssets = useEditor.getState().assets.map((a) =>
+    a.id === id ? { ...a } : a,
+  );
+  // Verify preAssets doesn't have a snapshot yet (pre-bug behavior).
+  check(
+    'preAssets snapshot is null before setGeometrySnapshot',
+    preAssets.find((a) => a.id === id)!.geometrySnapshot === null,
+  );
+
+  // Now meshOps would call setGeometrySnapshot then bump the nonce.
+  useEditor.getState().setGeometrySnapshot(id, {
+    positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+    indices: [0, 1, 2],
+  });
+  useEditor.setState((s) => ({
+    assets: s.assets.map((a) =>
+      a.id === id
+        ? { ...a, geometryMutationNonce: (a.geometryMutationNonce ?? 0) + 1 }
+        : a,
+    ),
+  }));
+
+  // Caller commits with preAssets (captured before setGeometrySnapshot).
+  useEditor.getState().commitMakeFace(id, preAssets, [0, 1, 2, 3]);
+
+  // The preAssets entry pushed to history should have the snapshot
+  // attached (the enrichment fix).
+  const pushedEntry = useEditor.getState().history.past.at(-1)!;
+  const pushedAsset = pushedEntry.find((a) => a.id === id)!;
+  check(
+    'pushed history entry has geometrySnapshot (enrichment fix)',
+    pushedAsset.geometrySnapshot !== null,
+  );
+
+  // The pre-undo state has a different nonce than the history entry,
+  // so the comparison correctly flags this asset as needing restore.
+  const curAsset = useEditor.getState().assets.find((a) => a.id === id)!;
+  const nonceDelta =
+    (curAsset.geometryMutationNonce ?? 0) - (pushedAsset.geometryMutationNonce ?? 0);
+  check(
+    'undo comparison: cur.nonce > pre.nonce (signals BufferGeometry change)',
+    nonceDelta === 1,
+    `cur=${curAsset.geometryMutationNonce} pre=${pushedAsset.geometryMutationNonce}`,
+  );
+
+  // Now undo and verify the asset has the snapshot back (so the
+  // bridge can restore BufferGeometry).
+  useEditor.getState().undo();
+  const afterUndo = useEditor.getState().assets.find((a) => a.id === id)!;
+  check(
+    'after undo, asset still has geometrySnapshot (so bridge can restore)',
+    afterUndo.geometrySnapshot !== null,
+  );
+}
+
 // ─── Phase 4a: collider + refit nonce ───────────────────────────────
 console.log('\n── phase 4a: collider + refit nonce ──');
 

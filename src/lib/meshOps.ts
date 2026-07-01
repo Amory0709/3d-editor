@@ -70,6 +70,16 @@ export function fillHolesOnAsset(assetId: string): number {
     if (positions) {
       useEditor.getState().setVertexData(assetId, Array.from(positions));
     }
+    // Bump the per-asset mutation nonce so undo/redo can detect that
+    // the BufferGeometry was mutated (snapshot reference alone is not
+    // a reliable signal after commitMakeFace enrichment).
+    useEditor.setState((s) => ({
+      assets: s.assets.map((a) =>
+        a.id === assetId
+          ? { ...a, geometryMutationNonce: (a.geometryMutationNonce ?? 0) + 1 }
+          : a,
+      ),
+    }));
   }
   return filled;
 }
@@ -150,19 +160,33 @@ export function fillHolesInGeometry(geometry: BufferGeometry): number {
 }
 
 /**
- * Phase 3.2b -- discard all per-vertex offsets for an asset, restoring
- * the geometry to its base shape. Convenience button for when edits
- * went sideways.
+ * Phase 3.2b -- discard all per-vertex offsets for an asset, so the
+ * geometry is rendered at its base positions on the next frame.
+ *
+ * Note: this only clears `vertexOffsets` (the per-vertex drag offsets
+ * applied every frame by EditableMesh.useFrame). It does NOT roll back
+ * destructive geometry mutations (hole-fill, make-face, boolean). For
+ * those, use Cmd+Z. The naming is intentionally "reset edits" rather
+ * than "reset geometry" to set that expectation.
+ *
+ * Why we touch the BufferGeometry: EditableMesh applies offsets in
+ * useFrame and writes the result back into `attr.array`. Once an
+ * offset has been baked into the array, just clearing the store's
+ * vertexOffsets isn't enough — the next frame's `applyOffsets(base,
+ * null)` would restore from the already-baked positions, not from the
+ * original base. So we explicitly set the position array back to
+ * `base` here.
  */
 export function resetVertexEdits(assetId: string): void {
   const geometry = getGeometry(assetId);
   if (!geometry) return;
   const base = readPositions(geometry);
   if (!base) return;
-  // If the geometry was grown by hole-fill, the "base" already
-  // includes the added centroids. Reset just zeros the offsets.
+  // If the geometry was grown by hole-fill, `base` already includes
+  // the added centroids (we read straight from the live BufferGeometry).
+  // applyOffsets with null returns a copy of base — i.e. zeroes any
+  // baked-in offset drift without removing the centroids.
   useEditor.getState().setVertexOffsets(assetId, null);
-  // Apply zero offsets to flush the geometry.
   const attr = geometry.getAttribute('position');
   if (attr) {
     attr.array.set(applyOffsets(base, null));
@@ -229,18 +253,31 @@ export function makeFaceOnAsset(
     newTris.push(unique[i + 1]);
   }
 
-  // Append to the index buffer.
+  // Append to the index buffer. Keep the typed-array width of the source
+  // so existing GPU buffers remain compatible. Indices never grow past
+  // 65535 here because makeFaceOnAsset only reuses existing vertices
+  // (no new vertex indices are introduced), so Uint16Array is safe.
   const oldIndices = idx.array;
   const oldIsUint32 = oldIndices instanceof Uint32Array;
-  const NewArr = oldIsUint32 ? Uint32Array : Uint16Array;
-  const next = new NewArr(oldIndices.length + newTris.length);
+  const IndexArrayCtor = oldIsUint32 ? Uint32Array : Uint16Array;
+  const next = new IndexArrayCtor(oldIndices.length + newTris.length);
   next.set(oldIndices);
+  let writeHead = oldIndices.length;
   for (let i = 0; i < newTris.length; i++) {
-    next[oldIndices.length + i] = newTris[i];
+    next[writeHead++] = newTris[i];
   }
   geometry.setIndex(new BufferAttribute(next, 1));
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
+  // Bump nonce so undo/redo detect the BufferGeometry mutation.
+  // (vertexOffsets didn't change — no setVertexData call here.)
+  useEditor.setState((s) => ({
+    assets: s.assets.map((a) =>
+      a.id === assetId
+        ? { ...a, geometryMutationNonce: (a.geometryMutationNonce ?? 0) + 1 }
+        : a,
+    ),
+  }));
   return newTris;
 }
 
@@ -356,6 +393,16 @@ export function booleanOnAssets(
 
   // Sync store offsets to the new vertex count.
   state.setVertexData(idA, Array.from(geomA.getAttribute('position').array as Float32Array));
+  // Bump nonce for undo/redo. The snapshot + setVertexData above have
+  // already mutated the asset record; this counter is the signal
+  // commitMakeFace / undo / redo compare against.
+  useEditor.setState((s) => ({
+    assets: s.assets.map((a) =>
+      a.id === idA
+        ? { ...a, geometryMutationNonce: (a.geometryMutationNonce ?? 0) + 1 }
+        : a,
+    ),
+  }));
 
   // Cleanup: the Brushes may share geometry with the original assets
   // (when no transform was applied), in which case disposing would yank
