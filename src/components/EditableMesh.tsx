@@ -4,6 +4,9 @@ import { useGLTF } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import {
   EdgesGeometry,
+  FrontSide,
+  DoubleSide,
+  type BufferAttribute,
   type BufferGeometry,
   type Camera,
   type LineSegments,
@@ -185,9 +188,32 @@ function LiveWireframe({
 }) {
   const lineRef = useRef<LineSegments>(null);
   const lastGeomRef = useRef<BufferGeometry | null>(null);
+  const lastVersionRef = useRef<number>(-1);
 
   useFrame(() => {
     if (!lineRef.current) return;
+    const attr = geometry.getAttribute('position');
+    if (!attr) return;
+
+    // Skip rebuild when the position attribute hasn't changed.
+    // BufferAttribute.version increments each time needsUpdate=true
+    // (set by useFrame in EditableMeshBody when applying offsets) —
+    // a cheap integer compare beats rebuilding 60 BufferGeometries per
+    // second. User reported intermittent jank; for complex GLBs the
+    // build cost (walk all triangles, allocate Float32 arrays, push to
+    // GPU) was the hotspot.
+    //
+    // Cast is needed because PositionAttr is typed as
+    // BufferAttribute | InterleavedBufferAttribute; the former has
+    // version, the latter doesn't. We only assign from
+    // geometry.getAttribute('position') which on a regular mesh is
+    // always BufferAttribute.
+    const posAttr = attr as BufferAttribute;
+    if (posAttr.version === lastVersionRef.current && lastGeomRef.current) {
+      return;
+    }
+    lastVersionRef.current = posAttr.version;
+
     // Rebuild from the live geometry (positions reflect current
     // vertexOffsets because useFrame just wrote them). EdgesGeometry
     // hides coplanar edges (threshold default 1°); WireframeGeometry
@@ -308,7 +334,22 @@ function EditableMeshBody({
       <GeometryRegistrar assetId={asset.id} geometry={geometry} />
       <mesh onClick={onSelect}>
         <primitive object={geometry} attach="geometry" />
-        <meshStandardMaterial color="#6da7ff" metalness={0.15} roughness={0.4} />
+        {/*
+          DoubleSide in edit mode: when the user drags a vertex, the
+          geometry can become non-convex and some faces flip inside-out.
+          FrontSide (the default) culls those back-facing triangles, so
+          the user would see "missing" faces at certain camera angles —
+          "转到菜个角度的时候有些面看不到" report.
+
+          Outside edit mode the gizmo user can still rotate the mesh
+          freely, but normal viewing keeps FrontSide for correct lighting.
+        */}
+        <meshStandardMaterial
+          color="#6da7ff"
+          metalness={0.15}
+          roughness={0.4}
+          side={isEditMode ? DoubleSide : FrontSide}
+        />
       </mesh>
       {/*
         Live wireframe (sibling, not child) so it has its own geometry
@@ -720,18 +761,17 @@ function VertexOverlay({
             }}
           >
             {/*
-              Sphere sizes are chosen so that even AFTER pointer capture
-              ends (e.g. user clicks elsewhere), the sphere is still easy
-              to grab on the next drag. 0.04 unselected is ~10px on
-              screen at default zoom — small enough to not clutter the
-              view, big enough to click without pixel-perfect aim.
-              After drag fix in this commit the cursor follows the
-              vertex through capturedMap-redirected events, but the
-              initial click STILL relies on a raycast hit on the sphere,
-              so the radius needs to be ≥1 px diameter at default
-              zoom. 0.04 gives ~10px — plenty of margin.
+              Sphere sizes: 0.025 unselected, 0.04 selected.
+              With R3F pointer capture working, the drag follows the
+              cursor regardless of hit-testing (see fix c013dd1), so
+              we don't need the bigger 0.04/0.07 hit target. User
+              reported '红色编辑的点很大' — the 0.07 selected size was
+              visually overwhelming the cube. ~6px unselected /
+              ~10px selected on default 1080px viewport keeps the
+              spheres easy to grab (capture means the raycast miss on
+              subsequent frames is fine) without clutter.
             */}
-            <sphereGeometry args={[isSelected ? 0.07 : 0.04, 8, 8]} />
+            <sphereGeometry args={[isSelected ? 0.04 : 0.025, 8, 8]} />
             <meshBasicMaterial color={isSelected ? '#ff5e5e' : '#ffeb3b'} />
           </mesh>
         );

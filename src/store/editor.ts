@@ -437,7 +437,18 @@ export const useEditor = create<EditorState>((set, get) => ({
       };
     }),
 
-  setActiveAsset: (id) => set({ activeAssetId: id, selectedVertices: [] }),
+  setActiveAsset: (id) =>
+    set((s) => ({
+      activeAssetId: id,
+      // Only wipe vertex selection when switching to a DIFFERENT asset.
+      // The cube mesh has onClick={onSelect} which fires every time the
+      // user clicks the cube body — even when the asset is already
+      // active. Resetting selectedVertices on every click made the
+      // spheres desync: click cube body (no intent to switch assets)
+      // → selection vanishes while the user clearly still owns those
+      // vertices. Same-asset click now keeps the selection.
+      selectedVertices: s.activeAssetId === id ? s.selectedVertices : [],
+    })),
 
   setAssetTransform: (id, transform) =>
     set((s) => {
