@@ -12,6 +12,7 @@ import {
   WireframeGeometry,
 } from 'three';
 import { Vector3 } from 'three';
+import type { ThreeEvent } from '@react-three/fiber';
 import type { AssetRef } from '@/store/editor';
 import type { PrimitiveType } from '@/lib/formats';
 import { useEditor } from '@/store/editor';
@@ -621,7 +622,35 @@ function VertexOverlay({
                 cameraUp,
                 preDragAssets: useEditor.getState().assets,
               };
-              (e.target as Element)?.setPointerCapture?.(e.pointerId);
+              // R3F-specific pointer capture. Plain DOM setPointerCapture
+              // (via e.target.setPointerCapture) makes the canvas keep
+              // receiving DOM events, but R3F's intersect() then
+              // raycasts to dispatch — and the cursor is no longer over
+              // the small (~13px) vertex sphere, so onPointerMove stops
+              // firing even though DOM events keep coming. The R3F-wrapped
+              // setPointerCapture (e.setPointerCapture) ALSO populates
+              // R3F's internal capturedMap, which intersect() consults
+              // to keep dispatching to captured objects regardless of
+              // raycast.
+              //
+              // Without this fix the vertex visually snaps to wherever
+              // the raycast happens to land each frame (or stops
+              // moving entirely once the cursor exits the sphere),
+              // producing the "doesn't follow mouse" symptom.
+              // R3F adds setPointerCapture / releasePointerCapture to
+              // the event object at runtime (see
+              // node_modules/@react-three/fiber/.../events.js). The
+              // wrapped method populates R3F's internal capturedMap
+              // so the raycast in intersect() doesn't need to find the
+              // sphere on every subsequent pointermove. The DOM's
+              // setPointerCapture alone is not enough — it keeps DOM
+              // events flowing on the canvas, but R3F's intersect()
+              // then raycasts, misses the small sphere, and the
+              // onPointerMove stops firing → vertex doesn't follow
+              // cursor.
+              (e as ThreeEvent<PointerEvent> & {
+                setPointerCapture: (id: number) => void;
+              }).setPointerCapture?.(e.pointerId);
             }}
             onPointerMove={(e) => {
               if (!dragRef.current || dragRef.current.vertexIdx !== i) return;
@@ -685,10 +714,24 @@ function VertexOverlay({
                 commitVertexEdit(pre);
               }
               setVertexDragging(false);
-              (e.target as Element)?.releasePointerCapture?.(e.pointerId);
+              (e as ThreeEvent<PointerEvent> & {
+                releasePointerCapture: (id: number) => void;
+              }).releasePointerCapture?.(e.pointerId);
             }}
           >
-            <sphereGeometry args={[isSelected ? 0.04 : 0.025, 8, 8]} />
+            {/*
+              Sphere sizes are chosen so that even AFTER pointer capture
+              ends (e.g. user clicks elsewhere), the sphere is still easy
+              to grab on the next drag. 0.04 unselected is ~10px on
+              screen at default zoom — small enough to not clutter the
+              view, big enough to click without pixel-perfect aim.
+              After drag fix in this commit the cursor follows the
+              vertex through capturedMap-redirected events, but the
+              initial click STILL relies on a raycast hit on the sphere,
+              so the radius needs to be ≥1 px diameter at default
+              zoom. 0.04 gives ~10px — plenty of margin.
+            */}
+            <sphereGeometry args={[isSelected ? 0.07 : 0.04, 8, 8]} />
             <meshBasicMaterial color={isSelected ? '#ff5e5e' : '#ffeb3b'} />
           </mesh>
         );
