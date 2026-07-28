@@ -528,3 +528,62 @@ button.primary:hover { filter: brightness(1.08); }
   margin: 0;
   color: var(--text-dim);
 }
+/* ---------- Phase 4f / Paint panel ---------- */
+.paint-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.paint-color-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.paint-color-input {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+}
+.paint-color-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.paint-mesh-list {
+  list-style: none;
+  margin: 0 0 8px 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.paint-mesh-list li {
+  border-bottom: 1px solid var(--border);
+}
+.paint-mesh-list li:last-child {
+  border-bottom: none;
+}
+.paint-mesh-btn {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.paint-mesh-btn:hover {
+  background: var(--panel-hover, rgba(255, 255, 255, 0.05));
+}
+.paint-mesh-btn.active {
+  background: rgba(90, 200, 250, 0.18);
+  color: #5ac8fa;
+}

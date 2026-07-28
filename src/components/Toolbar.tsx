@@ -5,6 +5,7 @@ import { ACCEPT_ATTR } from '@/lib/formats';
 
 const MODES: { id: EditorMode; label: string }[] = [
   { id: 'mesh', label: 'Mesh' },
+  { id: 'paint', label: 'Paint' },
   { id: 'collision', label: 'Collision' },
   { id: 'edit', label: 'Vertices' },
 ];
@@ -13,6 +14,10 @@ const MODES: { id: EditorMode; label: string }[] = [
 // still exist in the EditorMode union for type safety (so a
 // future setMode() call with a valid id compiles), but no UI
 // surfaces them (user feedback: hide both).
+//
+// 'paint' (phase 4f) IS exposed: per-mesh color picker for GLB /
+// OBJ assets. Click a part in the viewport to select it, then pick
+// a color in the sidebar.
 
 export function Toolbar() {
   const mode = useEditor((s) => s.mode);

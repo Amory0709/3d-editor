@@ -2,6 +2,8 @@ import { useEditor, type TransformMode, type EditorMode, type AxisLock } from '@
 import { PRIMITIVE_TYPES, primitiveLabel, COLLIDER_TYPES, colliderLabel, DEFAULT_COLLIDER } from '@/lib/formats';
 import { ColliderEditor } from './ColliderEditor';
 import { fillHolesOnAsset, resetVertexEdits, makeFaceOnAsset } from '@/lib/meshOps';
+import { useMemo } from 'react';
+import { useGLTF } from '@react-three/drei';
 
 // 'gaussian' is intentionally omitted: phase 5 deferred and the
 // toolbar no longer surfaces it. Marked with `Partial<Record<...>>`
@@ -33,6 +35,13 @@ const MODE_BLURB: Partial<Record<EditorMode, { title: string; lines: string[] }>
     lines: [
       'Vertex-level editing — click a vertex to grab, drag to move.',
       'Use the toolbar below: Reset / Fill holes / Make face.',
+    ],
+  },
+  paint: {
+    title: 'Paint mode',
+    lines: [
+      'Click any part of the GLB / OBJ to select it, then pick a color.',
+      'Each part keeps its own override; reset returns the asset to its imported colors.',
     ],
   },
 };
@@ -369,6 +378,21 @@ export function Sidebar() {
         </>
       )}
 
+      {/*
+        Phase 4f / Paint — per-mesh color picker. Click any mesh in
+        the viewport to select it (its Blender name round-trips
+        through the GLB exporter and shows here). The color picker
+        applies an override on top of the source material; the
+        source material itself is untouched so "Reset colors"
+        returns the asset to its imported look exactly.
+
+        Mesh list is shown so the user can pick parts that are
+        small / occluded without having to click them precisely.
+      */}
+      {mode === 'paint' && (
+        <PaintPanel />
+      )}
+
       <h3 className="section-title">Assets ({assets.length})</h3>
       {assets.length === 0 ? (
         <p className="empty">No assets loaded yet.</p>
@@ -440,4 +464,146 @@ export function Sidebar() {
       )}
     </aside>
   );
+}
+
+/**
+ * Phase 4f / Paint — sidebar panel.
+ *
+ * Renders only when the editor is in 'paint' mode. Shows the active
+ * asset's mesh list, lets the user pick one (highlights it in the
+ * viewport), then applies a color override through the store.
+ *
+ * For primitives (single mesh) the picker applies to the whole
+ * primitive via a sentinel key so the store stays simple.
+ */
+function PaintPanel() {
+  const activeAsset = useEditor((s) =>
+    s.activeAssetId ? s.assets.find((a) => a.id === s.activeAssetId) ?? null : null,
+  );
+  const paintSelected = useEditor((s) => s.paintSelectedMesh);
+  const setPaintSelectedMesh = useEditor((s) => s.setPaintSelectedMesh);
+  const setMeshColor = useEditor((s) => s.setMeshColor);
+  const clearMeshColors = useEditor((s) => s.clearMeshColors);
+  const playMode = useEditor((s) => s.playMode);
+
+  // Use a sentinel for primitives (single mesh). Keeps the store
+  // API uniform: every color override is keyed by some name.
+  const SENTINEL = '__primitive__';
+  const isPrimitive = activeAsset?.source === 'primitive';
+  const meshKey = isPrimitive ? SENTINEL : paintSelected;
+  const colors = activeAsset?.meshColors ?? {};
+  const currentColor = meshKey ? (colors[meshKey] ?? '#cccccc') : '#cccccc';
+
+  return (
+    <>
+      <h3 className="section-title">Paint</h3>
+      {!activeAsset ? (
+        <p className="empty section-empty">
+          Upload a .glb / .gltf / .obj, or add a primitive, to enable paint.
+        </p>
+      ) : (
+        <>
+          <p className="hint">
+            {isPrimitive
+              ? 'Primitives are one mesh — the color picker below applies to the whole asset.'
+              : 'Click a part in the viewport (or pick from the list below).'}
+          </p>
+          {!isPrimitive && (
+            <PaintMeshList
+              activeAssetId={activeAsset.id}
+              selected={paintSelected}
+              onPick={(name) => setPaintSelectedMesh(name)}
+            />
+          )}
+          <div className="paint-color-row">
+            <label className="paint-color-label" htmlFor="paint-color">Color</label>
+            <input
+              id="paint-color"
+              type="color"
+              className="paint-color-input"
+              value={currentColor}
+              disabled={!meshKey || playMode}
+              onChange={(e) => {
+                if (!meshKey) return;
+                setMeshColor(activeAsset.id, meshKey, e.target.value);
+              }}
+            />
+          </div>
+          <button
+            className="edit-btn"
+            disabled={playMode || Object.keys(colors).length === 0}
+            onClick={() => clearMeshColors(activeAsset.id)}
+          >
+            ⟲ Reset all colors
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Clickable list of every mesh in the active asset. Walks the GLB
+ * scene the same way PaintMesh does so the list always matches
+ * what's clickable in the viewport.
+ *
+ * Cheaper than reaching into R3F's scene graph on each render: the
+ * GLB loader caches its scene and `useGLTF(url)` returns the same
+ * reference between renders of the same asset, so we walk it once
+ * via useMemo keyed on the asset id.
+ */
+function PaintMeshList({
+  activeAssetId,
+  selected,
+  onPick,
+}: {
+  activeAssetId: string;
+  selected: string | null;
+  onPick: (name: string) => void;
+}) {
+  const assets = useEditor((s) => s.assets);
+  const asset = assets.find((a) => a.id === activeAssetId);
+  const url = asset?.url;
+  const gltf = usePaintScene(url);
+  const meshes = useMemo(() => collectPaintMeshes(gltf as never), [gltf]);
+  if (meshes.length === 0) {
+    return <p className="empty section-empty">No mesh parts in this asset.</p>;
+  }
+  return (
+    <ul className="paint-mesh-list">
+      {meshes.map((name) => (
+        <li key={name}>
+          <button
+            className={`paint-mesh-btn${selected === name ? ' active' : ''}`}
+            onClick={() => onPick(name)}
+          >
+            {name}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Wrap useGLTF so the list doesn't crash on OBJ / primitives. */
+function usePaintScene(url: string | undefined) {
+  // useGLTF is a hook \u2014 we have to call it unconditionally. When
+  // url is missing or the format isn't GLB, return null and let the
+  // hook below no-op via Suspense / drei's loader cache.
+  const safeUrl = url && url.length > 0 ? url : '__noop__';
+  try {
+    return useGLTF(safeUrl);
+  } catch {
+    return null;
+  }
+}
+
+function collectPaintMeshes(scene: { traverse: (cb: (o: unknown) => void) => void } | null): string[] {
+  const out: string[] = [];
+  if (!scene) return out;
+  scene.traverse((o) => {
+    const m = o as { isMesh?: boolean; name?: string };
+    if (m.isMesh && m.name) out.push(m.name);
+  });
+  return out;
 }

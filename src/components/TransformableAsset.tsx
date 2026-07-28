@@ -4,6 +4,7 @@ import type { AssetRef } from '@/store/editor';
 import { useEditor } from '@/store/editor';
 import { EditableMesh } from './EditableMesh';
 import { ColliderMarker } from './ColliderMarker';
+import { PaintMesh } from './PaintMesh';
 
 interface Props {
   asset: AssetRef;
@@ -81,6 +82,7 @@ export const TransformableAsset = forwardRef<Group, Props>(
     // the (pristine) base — but the offsets WERE in vertexOffsets
     // all along; they just had no mesh to render against.
     const interactive = editable === true && isEditMode;
+    const isPaintMode = mode === 'paint';
 
     return (
       <group
@@ -88,11 +90,25 @@ export const TransformableAsset = forwardRef<Group, Props>(
         position={asset.transform.position}
         scale={asset.transform.scale}
       >
-        <EditableMesh
-          asset={asset}
-          onSelect={onSelect ? () => onSelect() : undefined}
-          interactive={interactive}
-        />
+        {/*
+          Paint mode swaps EditableMesh for PaintMesh. EditableMesh
+          collapses a GLB to its first mesh, which is the wrong
+          shape for "click a part to recolor" \u2014 we need every
+          child mesh addressable. PaintMesh walks the loaded scene
+          graph and renders each child as its own primitive.
+
+          The transform wrapper above still owns position/rotation/scale
+          so the gizmo and physics integration keep working unchanged.
+        */}
+        {isPaintMode ? (
+          <PaintMesh asset={asset} interactive={interactive} />
+        ) : (
+          <EditableMesh
+            asset={asset}
+            onSelect={onSelect ? () => onSelect() : undefined}
+            interactive={interactive}
+          />
+        )}
         {asset.collider && <ColliderMarker spec={asset.collider} />}
       </group>
     );

@@ -29,7 +29,7 @@ export const DEFAULT_TRANSFORM: ObjectTransform = {
 
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 
-export type EditorMode = 'mesh' | 'collision' | 'gaussian' | 'edit' | 'combine';
+export type EditorMode = 'mesh' | 'collision' | 'gaussian' | 'edit' | 'combine' | 'paint';
 
 export type AxisLock = 'x' | 'y' | 'z' | null;
 
@@ -92,6 +92,16 @@ export interface AssetRef {
    * (See commitMakeFace for the rationale.)
    */
   geometryMutationNonce: number;
+
+  /**
+   * Phase 4f / Paint — per-mesh color overrides. Map of mesh.name (the
+   * original Blender object name, preserved by the GLB exporter) to a
+   * CSS hex string ('#rrggbb'). Missing / undefined = use the mesh's
+   * own material color. Lives on the asset so paint edits survive
+   * mode switches and asset switches (same persistence model as
+   * `vertexOffsets`). Undo via `history` (snapshot diff covers it).
+   */
+  meshColors?: Record<string, string>;
 }
 
 /**
@@ -133,6 +143,24 @@ export interface CollisionEvent {
 interface EditorState {
   mode: EditorMode;
   setMode: (mode: EditorMode) => void;
+
+  /**
+   * Phase 4f / Paint — per-mesh selection (within the active asset).
+   * The mesh name is what the GLB exporter preserves from Blender,
+   * so `container.005` round-trips. Cleared when the active asset
+   * changes or when leaving paint mode.
+   */
+  paintSelectedMesh: string | null;
+  setPaintSelectedMesh: (name: string | null) => void;
+
+  /**
+   * Phase 4f / Paint — set the color override for one mesh within one
+   * asset. Pushes a history snapshot before mutating so ⌘Z reverts.
+   * No-op in play mode (paint is an authoring concern).
+   */
+  setMeshColor: (assetId: string, meshName: string, color: string) => void;
+  /** Clear every per-mesh color override on an asset (back to material defaults). */
+  clearMeshColors: (assetId: string) => void;
 
   assets: AssetRef[];
   activeAssetId: string | null;
@@ -391,9 +419,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       // and any pending numeric edit would commit against the wrong
       // UI shape. UI disables mode tabs in play; this guard matches.
       if (s.playMode) return s;
-      return mode !== 'edit'
-        ? { mode, selectedVertices: [] }
-        : { mode };
+      // Mode-specific selections are wiped on mode change so a stale
+      // vertex index (edit) or mesh name (paint) doesn't dangle
+      // against a different mode's UI.
+      if (mode === 'edit') return { mode };
+      if (mode === 'paint') return { mode, selectedVertices: [], paintSelectedMesh: null };
+      return { mode, selectedVertices: [], paintSelectedMesh: null };
     }),
 
   assets: [],
@@ -448,6 +479,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       // → selection vanishes while the user clearly still owns those
       // vertices. Same-asset click now keeps the selection.
       selectedVertices: s.activeAssetId === id ? s.selectedVertices : [],
+      // Paint selection is keyed by mesh name within an asset; switching
+      // assets means the mesh name belongs to a different context, so
+      // clear it. Same-asset click keeps it (paint clicks fire on the
+      // mesh, not the asset wrapper).
+      paintSelectedMesh: s.activeAssetId === id ? s.paintSelectedMesh : null,
     })),
 
   setAssetTransform: (id, transform) =>
@@ -741,6 +777,48 @@ export const useEditor = create<EditorState>((set, get) => ({
   // set false). Viewport reads it to disable OrbitControls.
   vertexDragging: false,
   setVertexDragging: (dragging) => set({ vertexDragging: dragging }),
+
+  // ---------- Phase 4f / Paint ----------
+  paintSelectedMesh: null,
+  setPaintSelectedMesh: (name) =>
+    set((s) => {
+      // Clear when leaving paint mode (matches `selectedVertices`
+      // behavior — selection belongs to a mode, not to an asset).
+      if (s.mode !== 'paint' && name !== null) return s;
+      return { paintSelectedMesh: name };
+    }),
+
+  setMeshColor: (assetId, meshName, color) =>
+    set((s) => {
+      if (s.playMode) return s;
+      const target = s.assets.find((a) => a.id === assetId);
+      if (!target) return s;
+      const current = target.meshColors ?? {};
+      if (current[meshName] === color) return s;
+      return {
+        history: snapshotHistory(s.history, s.assets),
+        assets: s.assets.map((a) =>
+          a.id === assetId
+            ? { ...a, meshColors: { ...current, [meshName]: color } }
+            : a,
+        ),
+      };
+    }),
+
+  clearMeshColors: (assetId) =>
+    set((s) => {
+      if (s.playMode) return s;
+      const target = s.assets.find((a) => a.id === assetId);
+      if (!target?.meshColors || Object.keys(target.meshColors).length === 0) {
+        return s;
+      }
+      return {
+        history: snapshotHistory(s.history, s.assets),
+        assets: s.assets.map((a) =>
+          a.id === assetId ? { ...a, meshColors: undefined } : a,
+        ),
+      };
+    }),
 
   addPrimitive: (type) => {
     const id = crypto.randomUUID();

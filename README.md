@@ -20,6 +20,7 @@ Browser-based editor for mesh and gaussian-splat 3D assets.
 | 4c | done | Numeric collider editor: halfExtents / radius / height inputs with blur-clamp + blur-commit (one history entry per focus session) |
 | 4d | done | Play mode: Toolbar Play/Stop button (P shortcut), bodies flip dynamic, world.step() drives them, body→asset transform sync on stop (one history entry per play session) |
 | 4e | done | Collision events: world-level `beginContact` listener, sidebar log shows last 10 contacts with elapsed time, canonical (a < b) dedup, log persists across stop, clears on next play |
+| 4f | done | Paint mode: per-mesh color picker for GLB / OBJ assets. Click any part to select it, sidebar applies a hex color override. Original material untouched (reset returns the asset to its imported look exactly). Mesh list in sidebar for picking occluded / tiny parts. Color overrides survive asset switch + undo |
 | 5 | planned | Gaussian splat editor (`.splat`/`.ply`/`.spz`) |
 
 ## Run
