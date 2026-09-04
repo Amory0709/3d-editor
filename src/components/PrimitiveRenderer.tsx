@@ -10,8 +10,10 @@ import type { PrimitiveType } from '@/lib/formats';
  * creates primitive geometries.
  *
  * Geometry lifecycle: created in `useMemo([primitiveType])` inside
- * PrimitiveEditable, disposed via the `useEffect` cleanup in
- * EditableMeshBody.
+ * `PrimitiveEditable` (this file's caller, in `EditableMesh.tsx`) and
+ * disposed by a `useEffect` cleanup there on unmount or geometry change.
+ * R3F does not auto-dispose objects passed via `<primitive>`, so that
+ * explicit `.dispose()` is the only thing that frees the GPU buffers.
  */
 export function makeGeometry(type: PrimitiveType) {
   switch (type) {

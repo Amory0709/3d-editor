@@ -119,6 +119,20 @@ function PrimitiveEditable({
     () => makeGeometry(primitiveType),
     [primitiveType],
   );
+  // Free the GPU vertex/index buffers when this primitive unmounts
+  // (asset delete, paint-mode toggle) or when the geometry identity
+  // changes. R3F intentionally does NOT dispose objects passed via
+  // `<primitive>` ("their state may be kept outside of React!") and
+  // three.js never reclaims WebGLBuffers from GC alone, so the
+  // BufferGeometry from `makeGeometry` must be disposed explicitly
+  // here — otherwise every unmount leaks a dead WebGLBuffer until
+  // page reload. Mirrors the cleanup that lived in the old
+  // `<PrimitiveRenderer>` before commit d6f22db.
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
   return (
     <EditableMeshBody
       asset={asset}
