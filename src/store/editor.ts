@@ -694,6 +694,17 @@ export const useEditor = create<EditorState>((set, get) => ({
   setPlayMode: (play) => {
     const s = get();
     if (s.playMode === play) return;
+    // Phase 4d safety net: play is forbidden in edit mode (vertex
+    // editing is an offline operation, not a simulation). The Toolbar
+    // disables the Play/Stop button and the P keydown handler guards
+    // on `mode === 'edit'` too; this catches any other programmatic
+    // caller (future shortcut, drag-drop race, test) that bypasses the
+    // UI. Only the *entry* into play is blocked — stopping (play=false)
+    // is always allowed so a stray `playMode === true` in edit mode can
+    // always be cleared. This is a different transition from setMode's
+    // `playMode` guard, which prevents mode mutations *during* an
+    // already-established play session; the two are complementary.
+    if (play && s.mode === 'edit') return;
     if (play) {
       // Entering play: snapshot current assets so a future stop+undo
       // reverts the whole play session in one entry. We don't push

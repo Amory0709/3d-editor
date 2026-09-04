@@ -46,6 +46,15 @@ export function Toolbar() {
       }
       if (e.key === 'p' || e.key === 'P') {
         e.preventDefault();
+        // Match the Play/Stop button's `disabled={mode === 'edit'}`
+        // contract: play is forbidden in edit mode (vertex editing is
+        // an offline operation, not a simulation). Without this guard
+        // the shortcut entered play while the button was visibly
+        // disabled, leaving the store in `mode === 'edit' &&
+        // playMode === true`. The store's setPlayMode also guards this
+        // (defense in depth), but we no-op here so the request never
+        // reaches it.
+        if (useEditor.getState().mode === 'edit') return;
         useEditor.getState().setPlayMode(!useEditor.getState().playMode);
       }
     }
