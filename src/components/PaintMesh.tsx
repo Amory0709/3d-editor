@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { useLoader } from '@react-three/fiber';
@@ -125,7 +125,7 @@ function PaintBody({
   );
 }
 
-function PaintPart({
+export function PaintPart({
   source,
   name,
   overrideColor,
@@ -144,14 +144,38 @@ function PaintPart({
   // shows it via the store). Keeping it on the prop signature so
   // PaintBody's call site reads naturally.
   void name;
-  // Lazy-clone the material only when an override exists. The clone
-  // is keyed on (overrideColor, source) \u2014 changing the color
-  // rebuilds the clone. The source's own material stays untouched
-  // so resetting all colors returns to the imported look exactly.
+  // Capture the imported material ONCE, during render, BEFORE R3F's
+  // `<primitive object={material} attach="material" />` below replaces
+  // `source.material` with the colored clone (string-attach mutates the
+  // parent in place; the original is restored only on detach/unmount).
+  // Stash it in a ref so the reset path returns this captured original
+  // — a *different* instance from the live attached clone — which makes
+  // R3F reconstruct the material primitive (switchInstance → detach old
+  // + attach new) and restore the imported look. Returning the live
+  // `src.material` on reset instead returned the already-mutated clone,
+  // so R3F saw an unchanged object reference, skipped reconstruction
+  // (no detach), and the part stayed visibly colored until the component
+  // unmounted (mode switch / asset switch / reload).
+  // The `if (current === null)` init is the standard lazy-ref pattern:
+  // idempotent across React 18 StrictMode double-render and across
+  // discarded/re-invoked concurrent renders (src.material is the
+  // pristine import on every render that runs before the first commit).
+  const originalMatRef = useRef<Material | null>(null);
+  const src = source as unknown as { material: Material };
+  if (originalMatRef.current === null) {
+    originalMatRef.current = src.material;
+  }
+
+  // Lazy-clone the captured (imported) material only when an override
+  // exists. The clone is keyed on (overrideColor, source) — changing the
+  // color rebuilds the clone. Cloning from the captured original (not
+  // the live `src.material`, which R3F mutates on attach) keeps the
+  // source's own material pristine so resetting all colors returns to
+  // the imported look exactly.
   const material = useMemo(() => {
-    const src = source as unknown as { material: Material };
-    if (!overrideColor) return src.material;
-    const cloned = src.material.clone();
+    const base = originalMatRef.current ?? src.material;
+    if (!overrideColor) return base;
+    const cloned = base.clone();
     if ('color' in cloned && cloned.color) {
       cloned.color = new Color(overrideColor);
     }
