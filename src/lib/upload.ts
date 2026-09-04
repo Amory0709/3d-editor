@@ -36,7 +36,7 @@ export async function handleFiles(files: FileList | null): Promise<void> {
       continue;
     }
     const url = URL.createObjectURL(file);
-    addAsset({
+    const accepted = addAsset({
       id: crypto.randomUUID(),
       name: file.name,
       url,
@@ -51,6 +51,16 @@ export async function handleFiles(files: FileList | null): Promise<void> {
       geometrySnapshot: null,
       geometryMutationNonce: 0,
     });
+    if (!accepted) {
+      // The store rejected the add (e.g. the phase-4d play-mode guard).
+      // Don't count it: leaving `added` at 0 lets the `added === 0`
+      // branch below clear `loading`, so the UI doesn't stick on
+      // "loading…". The asset never entered the store, so removeAsset
+      // (the only other revoker) would never run — revoke here to avoid
+      // leaking the blob URL until tab close.
+      URL.revokeObjectURL(url);
+      continue;
+    }
     added++;
   }
 

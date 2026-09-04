@@ -164,7 +164,15 @@ interface EditorState {
 
   assets: AssetRef[];
   activeAssetId: string | null;
-  addAsset: (asset: AssetRef) => void;
+  /**
+   * Add an asset. Returns true if the asset was accepted, or false if the
+   * store rejected it (e.g. the phase-4d play-mode safety net). Callers that
+   * mint an object URL for the asset (handleFiles in lib/upload.ts) use the
+   * return value to avoid counting a rejected add and to revoke the URL
+   * they created — otherwise the blob leaks until tab close and the caller's
+   * "clear loading when nothing was added" branch is skipped.
+   */
+  addAsset: (asset: AssetRef) => boolean;
   removeAsset: (id: string) => void;
   setActiveAsset: (id: string | null) => void;
   setAssetTransform: (id: string, transform: ObjectTransform) => void;
@@ -431,13 +439,19 @@ export const useEditor = create<EditorState>((set, get) => ({
   activeAssetId: null,
   history: { past: [], future: [] },
 
-  addAsset: (asset) =>
+  addAsset: (asset) => {
+    // Phase 4d safety net: the UI disables the upload button in
+    // play, but we guard here too in case anything ever calls addAsset
+    // programmatically (keyboard shortcut, drag-drop race, test).
+    // Adding a static asset under a live dynamic world is incoherent.
+    // Signal rejection back to the caller by returning false so
+    // handleFiles doesn't count a no-op add (which would skip its
+    // setLoading(false) branch and pin the UI on "loading…") and can
+    // revoke the object URL it minted for the rejected asset.
+    let accepted = false;
     set((s) => {
-      // Phase 4d safety net: the UI disables the upload button in
-      // play, but we guard here too in case anything ever calls addAsset
-      // programmatically (keyboard shortcut, drag-drop race, test).
-      // Adding a static asset under a live dynamic world is incoherent.
       if (s.playMode) return s;
+      accepted = true;
       return {
         history: snapshotHistory(s.history, s.assets),
         assets: [...s.assets, asset],
@@ -448,7 +462,9 @@ export const useEditor = create<EditorState>((set, get) => ({
         // just on add.
         refitRequestNonce: s.refitRequestNonce + 1,
       };
-    }),
+    });
+    return accepted;
+  },
 
   removeAsset: (id) =>
     set((s) => {

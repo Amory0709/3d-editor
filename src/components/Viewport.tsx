@@ -251,6 +251,20 @@ export function Viewport() {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
+        // Mirror the toolbar's Upload-button guard (`disabled={loading ||
+        // playMode}`). Without this, dropping a valid file in play mode
+        // reached handleFiles, which set loading=true; addAsset's play-mode
+        // safety net silently rejected the asset, but handleFiles still
+        // counted the add, skipped its `added === 0` setLoading(false)
+        // branch, and no mesh mounted to clear loading — leaving the
+        // toolbar Upload button disabled and the viewport "loading…"
+        // tag visible with no in-app recovery cue.
+        const { playMode, loading, setError } = useEditor.getState();
+        if (playMode) {
+          setError('Stop play mode to upload assets');
+          return;
+        }
+        if (loading) return;
         void handleFiles(e.dataTransfer.files);
       }}
     >
