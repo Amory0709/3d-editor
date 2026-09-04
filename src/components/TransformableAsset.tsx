@@ -1,10 +1,45 @@
 import { forwardRef, useImperativeHandle, useRef, useLayoutEffect } from 'react';
 import type { Group } from 'three';
-import type { AssetRef } from '@/store/editor';
+import type { AssetRef, EditorMode } from '@/store/editor';
 import { useEditor } from '@/store/editor';
 import { EditableMesh } from './EditableMesh';
 import { ColliderMarker } from './ColliderMarker';
 import { PaintMesh } from './PaintMesh';
+
+/**
+ * Derive the `interactive` flag passed to each child renderer from
+ * the editor mode and whether this asset is the active one.
+ *
+ * The two children attach DIFFERENT meaning to their `interactive`
+ * prop, so they need separate flags:
+ *   - `EditableMesh`: gates the vertex-level interactive layer
+ *     (vertex handles, wireframe, DoubleSide material). Only
+ *     meaningful in edit mode.
+ *   - `PaintMesh`: gates click-to-pick a mesh part + the
+ *     `SelectedRing` viewport highlight. Only meaningful in paint
+ *     mode.
+ *
+ * Extracted as a pure function so the mode-gating is unit-testable
+ * without mounting the R3F <Canvas> (see
+ * `scripts/verify-paint-mode.mts`). This mirrors the `makeGeometry`
+ * pattern in `PrimitiveRenderer.tsx`.
+ *
+ * Regression note (introduced in 0d8122e, fixed here): the original
+ * wiring reused a single `interactive = editable && (mode === 'edit')`
+ * flag for BOTH children, so `PaintMesh` was handed `false` for the
+ * whole lifetime of paint mode — its click-to-pick handler no-op'd
+ * and the `SelectedRing` never mounted.
+ */
+export function interactiveFlagsFor(
+  mode: EditorMode,
+  editable: boolean | undefined,
+): { interactive: boolean; paintInteractive: boolean } {
+  const active = editable === true;
+  return {
+    interactive: active && mode === 'edit',
+    paintInteractive: active && mode === 'paint',
+  };
+}
 
 interface Props {
   asset: AssetRef;
@@ -47,7 +82,6 @@ export const TransformableAsset = forwardRef<Group, Props>(
   ({ asset, onSelect, editable }, ref) => {
     const groupRef = useRef<Group>(null);
     const mode = useEditor((s) => s.mode);
-    const isEditMode = mode === 'edit';
     useImperativeHandle(ref, () => groupRef.current as Group);
 
     useLayoutEffect(() => {
@@ -81,8 +115,18 @@ export const TransformableAsset = forwardRef<Group, Props>(
     // edited asset so <EditableMesh> remounted and re-snapshotted
     // the (pristine) base — but the offsets WERE in vertexOffsets
     // all along; they just had no mesh to render against.
-    const interactive = editable === true && isEditMode;
-    const isPaintMode = mode === 'paint';
+    //
+    // Paint mode has its OWN interactive contract (see
+    // PaintMesh's `interactive` prop doc): it gates click-to-pick
+    // a mesh part and the SelectedRing viewport highlight. That
+    // contract is satisfied by "the asset is the active one AND
+    // the editor is in paint mode" — NOT edit mode. Reusing the
+    // edit-mode flag here (the original wiring) left PaintMesh
+    // hard-wired to `false` for the whole lifetime of paint mode,
+    // so its click-to-pick handler no-op'd and the SelectedRing
+    // never mounted. The two flags are derived in
+    // `interactiveFlagsFor` (above) so the gating is unit-testable.
+    const { interactive, paintInteractive } = interactiveFlagsFor(mode, editable);
 
     return (
       <group
@@ -100,8 +144,8 @@ export const TransformableAsset = forwardRef<Group, Props>(
           The transform wrapper above still owns position/rotation/scale
           so the gizmo and physics integration keep working unchanged.
         */}
-        {isPaintMode ? (
-          <PaintMesh asset={asset} interactive={interactive} />
+        {mode === 'paint' ? (
+          <PaintMesh asset={asset} interactive={paintInteractive} />
         ) : (
           <EditableMesh
             asset={asset}
