@@ -356,14 +356,29 @@ function buildBody(
   updateBodyTransform(body, transform);
 
   const [sx, sy, sz] = transform.scale;
+  // transform.scale comes from the gizmo (TransformControls), which can
+  // produce negative components when a scale handle is dragged through
+  // the pivot, and can sit at exactly zero. cannon-es rejects a negative
+  // radius for Sphere/Cylinder (the per-frame tick would throw and freeze
+  // the sync), and a negative Box half-extent builds an inside-out
+  // polyhedron with inward-facing normals. All four shapes below are
+  // mirror-symmetric, so |scale| reproduces the envelope of the (possibly
+  // mirrored) visual; the epsilon floor avoids a degenerate zero-size
+  // shape. ColliderSpec numeric inputs are already clamped to MIN = 0.01
+  // in colliderInput.ts — this guards the transform.scale path, which
+  // bypasses that layer entirely. DO NOT drop the Math.abs: see
+  // verify-physics.mts "negative / mirrored scale" cases.
+  const ax = Math.max(1e-6, Math.abs(sx));
+  const ay = Math.max(1e-6, Math.abs(sy));
+  const az = Math.max(1e-6, Math.abs(sz));
 
   switch (spec.type) {
     case 'box': {
       const shape = new CANNON.Box(
         new CANNON.Vec3(
-          spec.halfExtents[0] * sx,
-          spec.halfExtents[1] * sy,
-          spec.halfExtents[2] * sz,
+          spec.halfExtents[0] * ax,
+          spec.halfExtents[1] * ay,
+          spec.halfExtents[2] * az,
         ),
       );
       body.addShape(shape);
@@ -373,7 +388,7 @@ function buildBody(
       // Use the max axis scale so the sphere fully encloses a stretched
       // mesh — a uniform-scale sphere approximation is the standard
       // choice when the visual is non-uniform.
-      const shape = new CANNON.Sphere(spec.radius * Math.max(sx, sy, sz));
+      const shape = new CANNON.Sphere(spec.radius * Math.max(ax, ay, az));
       body.addShape(shape);
       break;
     }
@@ -381,27 +396,27 @@ function buildBody(
       // Cylinder is along its local Y. The visual CylinderGeometry
       // under non-uniform X/Z scale becomes an elliptical cross-section
       // (X = r*sx, Z = r*sz), NOT a truncated cone. cannon-es Cylinder
-      // is circular, so we use max(sx, sz) for both top and bottom —
+      // is circular, so we use max(ax, az) for both top and bottom —
       // the body becomes a uniform Y-cylinder that contains the
       // visual's elliptical cross-section in both X and Z. See
       // verify-physics.mts "non-uniform scale" cases.
-      const r = spec.radius * Math.max(sx, sz);
-      const shape = new CANNON.Cylinder(r, r, spec.height * sy, 16);
+      const r = spec.radius * Math.max(ax, az);
+      const shape = new CANNON.Cylinder(r, r, spec.height * ay, 16);
       body.addShape(shape);
       break;
     }
     case 'capsule': {
       // Compound: cylinder (middle) + 2 spheres (ends), aligned along Y.
       // Not a primitive in cannon-es; this is the textbook construction.
-      // The radius uses max(sx, sz) so the body's circular cross-section
+      // The radius uses max(ax, az) so the body's circular cross-section
       // contains the visual's elliptical cross-section in X and Z. The
       // end-sphere radius inherits the same value, so the body's Y extent
       // (sphere radius extends in Y too) is an envelope — it can stick
-      // out past the visual's Y extent when sy < max(sx, sz). That's
+      // out past the visual's Y extent when ay < max(ax, az). That's
       // acceptable for phase 4b (capsule as envelope); a future phase
       // could swap spheres for ellipsoids if exactness matters.
-      const r = spec.radius * Math.max(sx, sz);
-      const h = spec.height * sy;
+      const r = spec.radius * Math.max(ax, az);
+      const h = spec.height * ay;
       body.addShape(new CANNON.Cylinder(r, r, h, 16));
       body.addShape(new CANNON.Sphere(r), new CANNON.Vec3(0, h / 2, 0));
       body.addShape(new CANNON.Sphere(r), new CANNON.Vec3(0, -h / 2, 0));

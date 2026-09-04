@@ -1246,6 +1246,352 @@ function reset(): void {
   );
 }
 
+// ─── Test 40: negative / mirrored / zero scale builds without throwing (every frame) ──
+// Regression (phase 4b): buildBody baked transform.scale into cannon-es
+// shape dimensions with no Math.abs / no clamp. A negative scale
+// (reachable from the gizmo when a scale handle is dragged through the
+// pivot) forwarded a negative radius to CANNON.Sphere / CANNON.Cylinder,
+// which validate `< 0` and throw — escaping PhysicsTicker.useFrame's
+// un-guarded syncBodies call every frame until the scale was undone,
+// freezing the per-frame sync. The fix normalizes each axis via
+// Math.abs and floors at 1e-6. This exercise hits the exact crash
+// surfaces from the bug report (uniform negative, X+Z mirror, single-
+// axis flip, all-zero, single-axis-zero) across all four collider types
+// in BOTH edit and play sync modes, and calls syncBodies twice per case
+// to simulate two consecutive frames — the bug threw every frame, not
+// just the first, so the second call confirms no stale throw state is
+// lurking in the rebuild path.
+{
+  reset();
+  const cases: Array<{ spec: ColliderSpec; label: string }> = [
+    { spec: { type: 'box', halfExtents: [0.5, 0.5, 0.5] }, label: 'box' },
+    { spec: { type: 'sphere', radius: 0.6 }, label: 'sphere' },
+    { spec: { type: 'cylinder', radius: 0.5, height: 1.2 }, label: 'cylinder' },
+    { spec: { type: 'capsule', radius: 0.4, height: 1.2 }, label: 'capsule' },
+  ];
+  const scales: Array<{ scale: [number, number, number]; label: string }> = [
+    { scale: [-2, -2, -2], label: 'uniform-neg' },
+    { scale: [-1, 1, -1], label: 'xz-mirror' },
+    { scale: [-1, 1, 1], label: 'x-flip' },
+    { scale: [0, 0, 0], label: 'all-zero' },
+    { scale: [0, 1, 1], label: 'x-zero' },
+  ];
+  const modes: Array<{ dynamic: boolean; label: string }> = [
+    { dynamic: false, label: 'edit' },
+    { dynamic: true, label: 'play' },
+  ];
+  const fails: string[] = [];
+  for (const c of cases) {
+    for (const s of scales) {
+      for (const m of modes) {
+        useEditor.getState().addPrimitive('cube');
+        const id = useEditor.getState().activeAssetId!;
+        useEditor.getState().setAssetCollider(id, c.spec);
+        useEditor.getState().setAssetTransform(id, {
+          position: [0, 0, 0], rotation: [0, 0, 0, 'XYZ'], scale: s.scale,
+        });
+        let threw = false;
+        try {
+          syncBodies(useEditor.getState().assets, m.dynamic);
+          syncBodies(useEditor.getState().assets, m.dynamic);
+        } catch {
+          threw = true;
+        }
+        if (threw) fails.push(`${c.label}@${s.label}@${m.label}`);
+        useEditor.getState().removeAsset(id);
+      }
+    }
+  }
+  check(
+    '40. negative / mirrored / zero scale: syncBodies builds all 4 shapes without throwing (edit + play, every frame)',
+    fails.length === 0,
+    fails.length === 0 ? '' : `threw: ${fails.join('; ')}`,
+  );
+}
+
+// ─── Test 41: |scale| reproduces the same envelope as the positive scale ──
+// The collider is mirror-symmetric, so the |scale| normalization must
+// yield the SAME dimensions as the equivalent positive scale: mirroring
+// a visual is a normal modelling op and must not shrink or grow its
+// collider. A pre-fix negative scale would either throw (curved shapes)
+// or invert the box; post-fix, [-2,-3,-4] ≡ [2,3,4] for every shape's
+// radius / halfExtent / height.
+{
+  reset();
+  const cases: Array<{ t: ColliderSpec['type']; spec: ColliderSpec; label: string }> = [
+    { t: 'box', spec: { type: 'box', halfExtents: [0.5, 0.5, 0.5] }, label: 'box' },
+    { t: 'sphere', spec: { type: 'sphere', radius: 0.6 }, label: 'sphere' },
+    { t: 'cylinder', spec: { type: 'cylinder', radius: 0.5, height: 1.2 }, label: 'cylinder' },
+    { t: 'capsule', spec: { type: 'capsule', radius: 0.4, height: 1.2 }, label: 'capsule' },
+  ];
+  const fails: string[] = [];
+  for (const c of cases) {
+    // Negative-scale asset. Build is wrapped because pre-fix the curved
+    // shapes threw on an all-negative scale; a clean per-check fail (not
+    // a mid-suite crash) is what makes this a useful regression test.
+    useEditor.getState().addPrimitive('cube');
+    const idNeg = useEditor.getState().activeAssetId!;
+    useEditor.getState().setAssetCollider(idNeg, c.spec);
+    useEditor.getState().setAssetTransform(idNeg, {
+      position: [0, 0, 0], rotation: [0, 0, 0, 'XYZ'], scale: [-2, -3, -4],
+    });
+    let negErr = '';
+    try {
+      syncBodies(useEditor.getState().assets, false);
+    } catch (e) {
+      negErr = (e as Error).message;
+    }
+    const bodyNeg = getBodyForAsset(idNeg);
+
+    // Equivalent positive-scale asset.
+    useEditor.getState().addPrimitive('cube');
+    const idPos = useEditor.getState().activeAssetId!;
+    useEditor.getState().setAssetCollider(idPos, c.spec);
+    useEditor.getState().setAssetTransform(idPos, {
+      position: [0, 0, 0], rotation: [0, 0, 0, 'XYZ'], scale: [2, 3, 4],
+    });
+    let posErr = '';
+    try {
+      syncBodies(useEditor.getState().assets, false);
+    } catch (e) {
+      posErr = (e as Error).message;
+    }
+    const bodyPos = getBodyForAsset(idPos);
+
+    if (negErr || posErr || !bodyNeg || !bodyPos) {
+      fails.push(`${c.label}: build failed (neg=${negErr || (bodyNeg ? 'ok' : 'no body')}, pos=${posErr || (bodyPos ? 'ok' : 'no body')})`);
+      useEditor.getState().removeAsset(idNeg);
+      useEditor.getState().removeAsset(idPos);
+      continue;
+    }
+
+    let ok = false;
+    let detail = '';
+    switch (c.t) {
+      case 'box': {
+        const a = (bodyNeg.shapes[0] as CANNON.Box).halfExtents;
+        const b = (bodyPos.shapes[0] as CANNON.Box).halfExtents;
+        ok = approx(a.x, b.x) && approx(a.y, b.y) && approx(a.z, b.z);
+        detail = `neg=(${a.x},${a.y},${a.z}) pos=(${b.x},${b.y},${b.z})`;
+        break;
+      }
+      case 'sphere': {
+        const a = (bodyNeg.shapes[0] as CANNON.Sphere).radius;
+        const b = (bodyPos.shapes[0] as CANNON.Sphere).radius;
+        ok = approx(a, b);
+        detail = `r neg=${a} pos=${b}`;
+        break;
+      }
+      case 'cylinder': {
+        const a = bodyNeg.shapes[0] as CANNON.Cylinder;
+        const b = bodyPos.shapes[0] as CANNON.Cylinder;
+        ok = approx(a.radiusTop, b.radiusTop) && approx(a.radiusBottom, b.radiusBottom) && approx(a.height, b.height);
+        detail = `neg=(rt${a.radiusTop},rb${a.radiusBottom},h${a.height}) pos=(rt${b.radiusTop},rb${b.radiusBottom},h${b.height})`;
+        break;
+      }
+      case 'capsule': {
+        const ca = bodyNeg.shapes[0] as CANNON.Cylinder;
+        const cb = bodyPos.shapes[0] as CANNON.Cylinder;
+        const sa = bodyNeg.shapes[1] as CANNON.Sphere;
+        const sb = bodyPos.shapes[1] as CANNON.Sphere;
+        ok = approx(ca.radiusTop, cb.radiusTop) && approx(ca.height, cb.height) && approx(sa.radius, sb.radius);
+        detail = `neg=(rt${ca.radiusTop},h${ca.height},sr${sa.radius}) pos=(rt${cb.radiusTop},h${cb.height},sr${sb.radius})`;
+        break;
+      }
+    }
+    if (!ok) fails.push(`${c.label}: ${detail}`);
+    useEditor.getState().removeAsset(idNeg);
+    useEditor.getState().removeAsset(idPos);
+  }
+  check(
+    '41. |scale|: mirrored [-2,-3,-4] ≡ positive [2,3,4] for all 4 shape dimensions',
+    fails.length === 0,
+    fails.join('; '),
+  );
+}
+
+// ─── Test 42: box under any negative/mirrored scale keeps positive halfExtents ──
+// Regression (phase 4b §4): CANNON.Box does NOT validate half-extents,
+// so a negative scale never threw — but it built an inside-out
+// ConvexPolyhedron whose face normals point inward. Positive halfExtents
+// is the exact precondition for a right-side-out box (vertices land on
+// the standard ±x/±y/±z corners with correct winding). The fix's Math.abs
+// guarantees this even for the single-axis flip (the simplest gizmo
+// mirror gesture, which never threw even pre-fix but still inverted the
+// polyhedron).
+{
+  reset();
+  const scales: Array<[number, number, number]> = [
+    [-1, 1, 1], [1, -1, 1], [1, 1, -1], [-2, -2, -2], [-1, 1, -1], [-2, -3, -4],
+  ];
+  const fails: string[] = [];
+  for (const scale of scales) {
+    useEditor.getState().addPrimitive('cube');
+    const id = useEditor.getState().activeAssetId!;
+    useEditor.getState().setAssetCollider(id, { type: 'box', halfExtents: [0.5, 0.5, 0.5] });
+    useEditor.getState().setAssetTransform(id, {
+      position: [0, 0, 0], rotation: [0, 0, 0, 'XYZ'], scale,
+    });
+    syncBodies(useEditor.getState().assets, false);
+    const he = (getBodyForAsset(id)!.shapes[0] as CANNON.Box).halfExtents;
+    if (!(he.x > 0 && he.y > 0 && he.z > 0)) {
+      fails.push(`(${scale.join(',')}) he=(${he.x},${he.y},${he.z})`);
+    }
+    useEditor.getState().removeAsset(id);
+  }
+  check(
+    '42. box under any negative/mirrored scale has strictly positive halfExtents (right-side-out)',
+    fails.length === 0,
+    fails.join('; '),
+  );
+}
+
+// ─── Test 43: zero scale floors to a tiny but valid non-zero dimension ──
+// An exactly-zero scale (gizmo resting at the pivot) must not produce a
+// zero-size shape: cannon-es validates only `< 0` (zero doesn't throw),
+// but a zero-radius sphere / zero-extent box confuses the broadphase —
+// the rationale for MIN = 0.01 in colliderInput.ts. The fix's 1e-6 floor
+// keeps every dimension strictly positive and finite, so a zero-scale
+// asset still produces a numerically valid (if tiny) body.
+{
+  reset();
+  const cases: Array<{ spec: ColliderSpec; label: string }> = [
+    { spec: { type: 'box', halfExtents: [0.5, 0.5, 0.5] }, label: 'box' },
+    { spec: { type: 'sphere', radius: 0.6 }, label: 'sphere' },
+    { spec: { type: 'cylinder', radius: 0.5, height: 1.2 }, label: 'cylinder' },
+    { spec: { type: 'capsule', radius: 0.4, height: 1.2 }, label: 'capsule' },
+  ];
+  const fails: string[] = [];
+  for (const c of cases) {
+    useEditor.getState().addPrimitive('cube');
+    const id = useEditor.getState().activeAssetId!;
+    useEditor.getState().setAssetCollider(id, c.spec);
+    useEditor.getState().setAssetTransform(id, {
+      position: [0, 0, 0], rotation: [0, 0, 0, 'XYZ'], scale: [0, 0, 0],
+    });
+    let threw = false;
+    try {
+      syncBodies(useEditor.getState().assets, false);
+    } catch {
+      threw = true;
+    }
+    if (threw) { fails.push(`${c.label}=THREW`); useEditor.getState().removeAsset(id); continue; }
+    const body = getBodyForAsset(id)!;
+    let allPosFinite = true;
+    for (const s of body.shapes) {
+      if (s instanceof CANNON.Sphere) {
+        if (!(Number.isFinite(s.radius) && s.radius > 0)) allPosFinite = false;
+      } else if (s instanceof CANNON.Cylinder) {
+        if (!(Number.isFinite(s.radiusTop) && s.radiusTop > 0 &&
+              Number.isFinite(s.radiusBottom) && s.radiusBottom > 0 &&
+              Number.isFinite(s.height) && s.height > 0)) allPosFinite = false;
+      } else if (s instanceof CANNON.Box) {
+        const he = s.halfExtents;
+        if (!(Number.isFinite(he.x) && he.x > 0 &&
+              Number.isFinite(he.y) && he.y > 0 &&
+              Number.isFinite(he.z) && he.z > 0)) allPosFinite = false;
+      }
+    }
+    if (!allPosFinite) fails.push(`${c.label}=non-positive/non-finite dim`);
+    useEditor.getState().removeAsset(id);
+  }
+  check(
+    '43. zero scale [0,0,0]: all 4 shapes build with strictly positive finite dimensions (epsilon floor)',
+    fails.length === 0,
+    fails.join('; '),
+  );
+}
+
+// ─── Test 44: full PhysicsTicker tick survives negative scale (sim not frozen) ──
+// End-to-end version of the bug: PhysicsTicker.useFrame calls syncBodies
+// THEN stepWorld every frame with no try/catch. Pre-fix the throw in
+// syncBodies escaped the R3F frame loop every frame and stepWorld never
+// ran — freezing the simulation while the negative scale persisted.
+// Simulate a full tick loop at a uniform-negative-scale asset and confirm
+// the loop completes every frame AND a dynamic body still falls under
+// gravity (the body is a valid dynamics participant and the sim isn't
+// frozen / didn't fall through the ground).
+{
+  reset();
+  useEditor.getState().addPrimitive('cube');
+  const id = useEditor.getState().activeAssetId!;
+  useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.sphere);
+  // Set the (mirrored) transform BEFORE entering play mode —
+  // setAssetTransform is a no-op once playMode is on (Test 28).
+  useEditor.getState().setAssetTransform(id, {
+    position: [0, 5, 0], rotation: [0, 0, 0, 'XYZ'], scale: [-2, -2, -2],
+  });
+  useEditor.getState().setPlayMode(true);
+  let tickThrows = 0;
+  for (let i = 0; i < 60; i++) {
+    try {
+      syncBodies(useEditor.getState().assets, true);
+      stepWorld(1 / 60);
+    } catch {
+      tickThrows++;
+    }
+  }
+  check(
+    '44a. 60 full ticks (syncBodies + stepWorld) at scale [-2,-2,-2] throw 0 times',
+    tickThrows === 0,
+    `throws=${tickThrows}`,
+  );
+  // Sphere radius = 0.6 * max(|-2|,|-2|,|-2|) = 1.2; resting center ≈ 1.2.
+  // It must have fallen below 5 (sim ran) and not tunneled through the
+  // ground (still above 0). Guard the null body: pre-fix the build threw
+  // every frame, so the body was never created — a clean ✗ here beats a
+  // mid-suite null-deref crash.
+  const body = getBodyForAsset(id);
+  const yAfter = body ? body.position.y : Number.NaN;
+  check(
+    '44b. dynamic mirrored sphere falls under gravity (sim not frozen, no tunnel)',
+    body !== null && yAfter < 4.5 && yAfter > 0,
+    body === null ? 'no body (build threw every frame)' : `y 5 → ${yAfter.toFixed(4)}`,
+  );
+  useEditor.getState().setPlayMode(false);
+}
+
+// ─── Test 45: mirrored box build emits no cannon-es "inside-out" warning ──
+// Regression (phase 4b §4): CANNON.Box doesn't throw on a negative scale,
+// but its CONSTRUCTOR calls updateConvexPolyhedronRepresentation, which
+// builds the ConvexPolyhedron from the raw (possibly negative) half-
+// extents. A negative component inverts the winding, and cannon-es's
+// own convex handedness check fires a console.error
+// ("looks like it points into the shape") — six per face, on the very
+// first syncBodies at a mirrored scale (no contact needed). The Math.abs
+// fix keeps halfExtents positive so the polyhedron is right-side-out
+// and the check is silent. Capture console.error across several
+// mirrored/zero scales and assert zero "points into the shape" messages.
+{
+  reset();
+  const warnings: string[] = [];
+  const origError = console.error;
+  console.error = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+  try {
+    const scales: Array<[number, number, number]> = [
+      [-1, -1, -1], [-1, 1, 1], [1, -1, 1], [1, 1, -1], [-2, -3, -4], [0, 0, 0],
+    ];
+    for (const scale of scales) {
+      useEditor.getState().addPrimitive('cube');
+      const id = useEditor.getState().activeAssetId!;
+      useEditor.getState().setAssetCollider(id, DEFAULT_COLLIDER.box);
+      useEditor.getState().setAssetTransform(id, {
+        position: [0, 0, 0], rotation: [0, 0, 0, 'XYZ'], scale,
+      });
+      syncBodies(useEditor.getState().assets, false);
+      useEditor.getState().removeAsset(id);
+    }
+  } finally {
+    console.error = origError;
+  }
+  const insideOut = warnings.filter((w) => w.includes('looks like it points into the shape'));
+  check(
+    '45. box build under negative/mirrored/zero scale: no cannon-es "points into the shape" warnings',
+    insideOut.length === 0,
+    insideOut.length === 0 ? '' : `${insideOut.length} warnings, first: ${insideOut[0].slice(0, 80)}`,
+  );
+}
+
 // ─── Summary ──────────────────────────────────────────────────────
 const passed = RESULTS.filter((r) => r.pass).length;
 const failed = RESULTS.length - passed;
