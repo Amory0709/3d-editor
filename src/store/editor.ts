@@ -219,9 +219,12 @@ interface EditorState {
    * lib/meshOps BEFORE the geometry mutation, so undo (which restores
    * the AssetRef) also has the pre-mutation geometry to write back.
    *
-   * If a snapshot already exists, do NOT overwrite — the existing
-   * snapshot represents an earlier state the user hasn't rewound
-   * from yet.
+   * Each call OVERWRITES the snapshot. Every destructive op must
+   * capture its own pre-op state, because undo pops exactly one
+   * enriched history entry per call: undoing the latest of N stacked
+   * ops must rewind only that op (live mesh = state after op N-1),
+   * not all N at once. Pass null to clear (e.g. when the asset is
+   * removed or its geometry is replaced wholesale).
    */
   setGeometrySnapshot: (
     id: string,
@@ -653,18 +656,21 @@ export const useEditor = create<EditorState>((set, get) => ({
    * Set an asset's geometrySnapshot. Pass null to clear it (e.g. when
    * the asset is removed or its geometry is replaced wholesale).
    *
-   * Internal note: this is called by meshOps immediately before a
-   * destructive mutation. If a snapshot already exists, we leave it
-   * alone — the user hasn't rewound past the earlier mutation yet,
-   * so the existing snapshot is still the correct undo target.
+   * Called by lib/meshOps immediately before every destructive geometry
+   * mutation (fill-holes / make-face / boolean CSG). Each call
+   * OVERWRITES the snapshot so the per-op pre-op state is captured:
+   * undo pops exactly one enriched history entry per call, so it must
+   * read the snapshot for the op being rewound (post-op N-1), not the
+   * first op's pre-op state (pre-op 1). An earlier "sticky" guard
+   * (`if (a.geometrySnapshot) return a;`) dropped every snapshot after
+   * the first, so multi-step undo over-rewound the live mesh all the
+   * way to before op 1.
    */
   setGeometrySnapshot: (id, snapshot) =>
     set((s) => ({
       assets: s.assets.map((a) => {
         if (a.id !== id) return a;
         if (snapshot === null) return { ...a, geometrySnapshot: null };
-        // Only set if not already set.
-        if (a.geometrySnapshot) return a;
         return { ...a, geometrySnapshot: snapshot };
       }),
     })),
