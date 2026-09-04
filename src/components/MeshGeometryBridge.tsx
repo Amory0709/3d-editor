@@ -64,6 +64,50 @@ export function GeometryRegistrar({
 }
 
 /**
+ * Write a `geometrySnapshot` (positions + indices) back into a live
+ * three.js `BufferGeometry`. Pure with respect to the store — the
+ * caller hands it the geometry and the snapshot — but it mutates the
+ * `BufferGeometry` in place (positions, index, normals, bounding
+ * sphere), exactly as the inline restore body did before the
+ * extraction.
+ *
+ * Extracted from `GeometryUndoBridge` so it can be exercised by
+ * node-level verify scripts (the component itself requires a
+ * `<Canvas>`, which isn't available outside the browser). The
+ * behavior is byte-for-byte the same; the component now calls this.
+ *
+ * Position restore: `posAttr.array.set(posArr)` only overwrites the
+ * PREFIX when the snapshot is shorter than the live buffer. Callers
+ * must ensure `snap.positions` matches the geometry the snapshot was
+ * captured from (the per-op snapshot from `setGeometrySnapshot`
+ * does); a stale shorter snapshot leaves orphaned trailing vertices.
+ */
+export function applySnapshotToGeometry(
+  geom: BufferGeometry,
+  snap: { positions: number[]; indices: number[] | null },
+): void {
+  // Restore positions.
+  const posArr = new Float32Array(snap.positions);
+  const posAttr = geom.getAttribute('position');
+  if (posAttr) {
+    posAttr.array.set(posArr);
+    posAttr.needsUpdate = true;
+  } else {
+    geom.setAttribute('position', new BufferAttribute(posArr, 3));
+  }
+  // Restore indices.
+  if (snap.indices) {
+    const useUint32 = snap.positions.length / 3 > 65535;
+    const idxArr = useUint32 ? new Uint32Array(snap.indices) : new Uint16Array(snap.indices);
+    geom.setIndex(new BufferAttribute(idxArr, 1));
+  } else {
+    geom.setIndex(null);
+  }
+  geom.computeVertexNormals();
+  geom.computeBoundingSphere();
+}
+
+/**
  * Phase 3.2b/3.2c/5 — listen to `geometryUndoNonce` from the store.
  * When undo/redo rewinds a geometry mutation, this writes the
  * `geometrySnapshot` arrays back into the live BufferGeometry so the
@@ -100,25 +144,9 @@ export function GeometryUndoBridge() {
         );
         continue;
       }
-      // Restore positions.
-      const posArr = new Float32Array(snap.positions);
-      const posAttr = geom.getAttribute('position');
-      if (posAttr) {
-        posAttr.array.set(posArr);
-        posAttr.needsUpdate = true;
-      } else {
-        geom.setAttribute('position', new BufferAttribute(posArr, 3));
-      }
-      // Restore indices.
-      if (snap.indices) {
-        const useUint32 = snap.positions.length / 3 > 65535;
-        const idxArr = useUint32 ? new Uint32Array(snap.indices) : new Uint16Array(snap.indices);
-        geom.setIndex(new BufferAttribute(idxArr, 1));
-      } else {
-        geom.setIndex(null);
-      }
-      geom.computeVertexNormals();
-      geom.computeBoundingSphere();
+      // Restore positions + indices + normals + bounding sphere from
+      // the asset's pre-op snapshot. See applySnapshotToGeometry.
+      applySnapshotToGeometry(geom, snap);
     }
   }, [nonce, targetsKey]);
   return null;
