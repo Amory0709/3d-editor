@@ -4,6 +4,7 @@ import { ColliderEditor } from './ColliderEditor';
 import { fillHolesOnAsset, resetVertexEdits, makeFaceOnAsset } from '@/lib/meshOps';
 import { useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
+import type { Object3D } from 'three';
 
 // 'gaussian' is intentionally omitted: phase 5 deferred and the
 // toolbar no longer surfaces it. Marked with `Partial<Record<...>>`
@@ -565,7 +566,10 @@ function PaintMeshList({
   const asset = assets.find((a) => a.id === activeAssetId);
   const url = asset?.url;
   const gltf = usePaintScene(url);
-  const meshes = useMemo(() => collectPaintMeshes(gltf as never), [gltf]);
+  // Pass gltf.scene (Object3D), NOT the useGLTF wrapper — the wrapper
+  // has no .traverse so the old `collectPaintMeshes(gltf as never)` threw
+  // TypeError and blanked the editor via the top-level ErrorBoundary.
+  const meshes = useMemo(() => collectPaintMeshes(gltf?.scene ?? null), [gltf]);
   if (meshes.length === 0) {
     return <p className="empty section-empty">No mesh parts in this asset.</p>;
   }
@@ -598,12 +602,11 @@ function usePaintScene(url: string | undefined) {
   }
 }
 
-function collectPaintMeshes(scene: { traverse: (cb: (o: unknown) => void) => void } | null): string[] {
+export function collectPaintMeshes(root: Object3D | null): string[] {
   const out: string[] = [];
-  if (!scene) return out;
-  scene.traverse((o) => {
-    const m = o as { isMesh?: boolean; name?: string };
-    if (m.isMesh && m.name) out.push(m.name);
+  if (!root) return out;
+  root.traverse((o) => {
+    if ((o as { isMesh?: boolean }).isMesh && o.name) out.push(o.name);
   });
   return out;
 }
