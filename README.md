@@ -133,7 +133,6 @@ src/
   lib/
     formats.ts       # single source of truth for supported formats + primitive types
     upload.ts        # file picker / drop ingestion
-    dispose.ts       # Three.js GPU-buffer disposal
     keyboard.ts      # editor keyboard shortcuts
 scripts/
   smoke-load-gltf.ts # GLB loader sanity check (needs a .glb you supply)
